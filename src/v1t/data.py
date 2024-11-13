@@ -17,6 +17,7 @@ DS_NAMES = t.Literal["sensorium", "franke2022"]
 # key - mouse ID, value - filename of the recordings
 # Mouse S0: Sensorium, Mouse S1: Sensorium+
 SENSORIUM = {
+    "S": "synthetic",
     "S0": "static26872-17-20-GrayImageNet-94c6ff995dac583098847cfecd43e7b6",
     "S1": "static27204-5-13-GrayImageNet-94c6ff995dac583098847cfecd43e7b6",
     "A": "static21067-10-18-GrayImageNet-94c6ff995dac583098847cfecd43e7b6",
@@ -24,6 +25,22 @@ SENSORIUM = {
     "C": "static23343-5-17-GrayImageNet-94c6ff995dac583098847cfecd43e7b6",
     "D": "static23656-14-22-GrayImageNet-94c6ff995dac583098847cfecd43e7b6",
     "E": "static23964-4-22-GrayImageNet-94c6ff995dac583098847cfecd43e7b6",
+    "1_1": "1_25_13_12_3_2",
+    "2_1": "2_25_13_12_3_2",
+    "3A_ns": "3a_25_13_12_3_2_not_scaled",
+    "3A_s": "3a_25_13_12_3_2_scaled",
+    "3A_std1": "3a_25_13_12_3_2_std_1",    
+    "3A_std5": "3a_25_13_12_3_2_std_5",
+    "3A_std10": "3a_25_13_12_3_2_std_10",
+    "3A_std20": "3a_25_13_12_3_2_std_20",
+    "3A_std40": "3a_25_13_12_3_2_std_40",
+    "3A_std100": "3a_25_13_12_3_2_std_100",
+    "3A_std200": "3a_25_13_12_3_2_std_200",
+    "3A_std300": "3a_25_13_12_3_2_std_300",
+    "1_s3_c12_125": "s3_c1_c2_25_12.5_12_12_2_4", 
+    "1_s3_c12_13": "s3_c1_c2_25_13_12_12_2_4",
+    "1_s3_c2_125": "s3_c2_25_12.5_12_12_2_4",
+    "1_s3_c2_13": "s3_c2_25_13_12_12_2_4",
 }
 
 FRANKE2022 = {

@@ -3,6 +3,7 @@ import typing as t
 import numpy as np
 from copy import deepcopy
 from scipy.stats import pearsonr
+from scipy.special import gammaln
 from torch.utils.data import DataLoader
 
 
@@ -164,3 +165,63 @@ class Metrics:
             )
             cc_norm.append(cc_abs / cc_max)
         return np.mean(cc_norm)
+    
+
+
+    def neg_log_likelihood(self, zero_warning=True):
+        """Calculates Poisson negative log likelihood given rates and spikes.
+        formula: -log(e^(-r) / n! * r^n)
+            = r - n*log(r) + log(n!)
+
+        Args:
+            zero_warning : bool, optional: Whether to print out warning about 0 rate predictions or not
+
+        Returns:
+            float: Total negative log-likelihood of the data
+        """
+        rates, spikes = self.predictions, self.targets # rate predictions, true spike counts
+
+        assert (
+            spikes.shape == rates.shape
+        ), f"neg_log_likelihood: Rates and spikes should be of the same shape. spikes: {spikes.shape}, rates: {rates.shape}"
+
+        if np.any(np.isnan(spikes)):
+            mask = np.isnan(spikes)
+            rates = rates[~mask]
+            spikes = spikes[~mask]
+
+        assert not np.any(np.isnan(rates)), "neg_log_likelihood: NaN rate predictions found"
+
+        assert np.all(rates >= 0), "neg_log_likelihood: Negative rate predictions found"
+        if np.any(rates == 0):
+            # if zero_warning:
+            #     logger.warning(
+            #         "neg_log_likelihood: Zero rate predictions found. Replacing zeros with 1e-9"
+            #     )
+            rates[rates == 0] = 1e-9
+
+        result = rates - spikes * np.log(rates) + gammaln(spikes + 1.0)
+        return np.sum(result)
+
+
+    def bits_per_spike(self):
+        """Co-smoothing metric 
+
+        Code reference: https://github.com/neurallatents/nlb_tools/blob/1ddc15f45b56388ff093d1396b7b87b36fa32a68/nlb_tools/evaluation.py#L252
+        
+        Computes bits per spike of rate predictions given spikes.
+        Bits per spike is equal to the difference between the log-likelihoods (in base 2)
+        of the rate predictions and the null model (i.e. predicting mean firing rate of each neuron)
+        divided by the total number of spikes.
+
+        Returns:
+            float: Bits per spike of rate predictions
+        """
+        rates, spikes = self.predictions, self.targets # rate predictions, true spike counts
+        nll_model = self.neg_log_likelihood(rates, spikes)
+        null_rates = np.tile(
+            np.nanmean(spikes, axis=tuple(range(spikes.ndim - 1)), keepdims=True),
+            spikes.shape[:-1] + (1,),
+        )
+        nll_null = self.neg_log_likelihood(null_rates, spikes, zero_warning=False)
+        return (nll_null - nll_model) / np.nansum(spikes) / np.log(2)

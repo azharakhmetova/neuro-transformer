@@ -405,7 +405,7 @@ if __name__ == "__main__":
         "--device",
         type=str,
         default="",
-        choices=["cpu", "cuda", "mps"],
+        choices=["cpu", "cuda", "cuda:0", "cuda:1", "cuda:2", "cuda:3", "cuda:4", "cuda:5", "cuda:6", "mps"],
         help="Device to use for computation. "
         "Use the best available device if --device is not specified.",
     )
