@@ -6,6 +6,7 @@ import typing as t
 from torch import nn
 import torch.distributed
 from torch.utils.data import DataLoader
+import numpy as np
 
 
 from v1t.models.core import get_core
@@ -154,6 +155,7 @@ class Model(nn.Module):
         mouse_id: str,
         behaviors: torch.Tensor,
         pupil_centers: torch.Tensor,
+        neuron_inputs: torch.Tensor = None,
         activate: bool = True,
     ):
         images, image_grids = self.image_cropper(
@@ -171,7 +173,9 @@ class Model(nn.Module):
         shifts = None
         if self.core_shifter is not None:
             shifts = self.core_shifter(pupil_centers, mouse_id=mouse_id)
-        outputs = self.readouts(outputs, mouse_id=mouse_id, shifts=shifts)
+        neuron_ids = None#np.array([0, 1, 2, 3, 4])
+        query_neuron_subset = False#True 
+        outputs = self.readouts(outputs, mouse_id=mouse_id, neuron_ids=neuron_ids, query_neuron_subset=query_neuron_subset, shifts=shifts)
         if activate:
             outputs = self.elu1(outputs)
         return outputs, images, image_grids

@@ -646,6 +646,11 @@ if __name__ == "__main__":
             "2: initialize bias with the mean responses divide by standard deviation",
         )
         parser.add_argument("--readout_reg_scale", type=float, default=0.0076)
+    elif temp_args.readout == "attention":
+        # parser.add_argument("--num_heads", type=int, default=4)
+        # parser.add_argument("--emb_dim", type=int, default=155)
+        parser.add_argument("--readout_reg_scale", type=float, default=0.0076)
+        parser.add_argument("--dropout", type=float, default=0.2544)
     else:
         parser.add_argument("--readout_reg_scale", type=float, default=0.0)
 
