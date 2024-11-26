@@ -18,6 +18,8 @@ REDUCTIONS = t.Literal["sum", "mean", None]
 class CrossAttention(nn.Module):
     def __init__(
         self,
+        input_shape: tuple,
+        num_neurons: int,
         emb_dim: int,
         num_heads: int = 8,
         dropout: float = 0.0,
@@ -31,8 +33,8 @@ class CrossAttention(nn.Module):
 
         inner_dim = emb_dim * num_heads
 
-        self.layer_norm_q = nn.LayerNorm(emb_dim)  # Normalize queries
-        self.layer_norm_kv = nn.LayerNorm(emb_dim)  # Normalize keys/values
+        self.layer_norm_q = nn.LayerNorm((num_neurons, emb_dim))  # Normalize queries
+        self.layer_norm_kv = nn.LayerNorm((input_shape[1]*input_shape[2], emb_dim))  # Normalize keys/values
 
         self.to_q = nn.Linear(
             in_features=emb_dim, out_features=inner_dim, bias=False
@@ -125,10 +127,12 @@ class AttentionReadout(Readout):
             name=name,
         )
 
-        emb_dim = input_shape[1] #[B, C, H, W]
+        emb_dim = input_shape[0] #[C, H, W]
         num_patches = input_shape[-1]*input_shape[-2]  
 
         self.cross_attention = CrossAttention(
+            input_shape=input_shape,
+            num_neurons=self.num_neurons,
             emb_dim=emb_dim,
             num_heads=num_heads,
             dropout=dropout,
@@ -139,9 +143,9 @@ class AttentionReadout(Readout):
         )
 
         self.dropout = nn.Dropout(p=dropout)
-
+        # print("emb_dim  ", emb_dim)
         self.neuron_tokenizer = NeuronTokenizer(num_neurons=self.num_neurons, emb_dim=emb_dim)
-        self.neuron_projection = nn.Linear(in_features=emb_dim, out_features=self.num_neurons, bias=True)
+        self.neuron_projection = nn.Linear(in_features=emb_dim, out_features=1, bias=True)
 
     def forward(self, inputs: torch.Tensor, neuron_ids: torch.Tensor = None, query_neuron_subset: bool = False, shifts: torch.Tensor = None): 
         batch_size = inputs.size(0)
@@ -155,23 +159,38 @@ class AttentionReadout(Readout):
 
         neuron_queries = self.neuron_tokenizer(neuron_ids)  # [B, N_neurons, D]
         neuron_queries = self.dropout(neuron_queries)
-        outputs = self.cross_attention(q=neuron_queries, kv=inputs)  # [B, N_neurons, D]
+        # print("q  ", neuron_queries.shape)
+        kv = rearrange(inputs, 'b c h w -> b (h w) c') 
+        # print("kv  ", kv.shape)
+        outputs = self.cross_attention(q=neuron_queries, kv=kv)  # [B, N_neurons, D]
+        # print("outputs CA  ", outputs.shape)
         outputs = self.dropout(outputs)
-        outputs = self.neuron_projection(outputs)  # [B, N_neurons]
+        outputs = self.neuron_projection(outputs).squeeze(-1)  # [B, N_neurons]
+        # print("outputs  ", outputs.shape)
+
+        # outputs = []
+
+        # # Attend to each neuron individually
+        # for i in range(self.num_neurons):
+        #     # Select embedding for the i-th neuron
+        #     single_neuron_query = neuron_queries[:, i, :].unsqueeze(1)  # [B, 1, D]
+
+        #     # Compute attention for the single neuron
+        #     single_neuron_output = self.cross_attention(q=single_neuron_query, kv=inputs)  # [B, 1, D]
+
+        #     # Apply projection to map to a scalar value for the neuron
+        #     single_neuron_output = self.neuron_projection(single_neuron_output).squeeze(1)  # [B, 1] -> [B]
+
+        #     # Append to the results
+        #     outputs.append(single_neuron_output)
+
+        # # Concatenate results for all neurons
+        # outputs = torch.stack(outputs, dim=1) 
 
         return outputs
 
 
-    def neuron_l1(self, reduction: str = "sum"):
-        """
-        Returns L1 regularization term for NeuronTokenizer embeddings.
-
-        Args:
-            reduction (str): Specifies the reduction to apply to the output ('none', 'mean', 'sum').
-
-        Returns:
-            torch.Tensor: L1 regularization term.
-        """
+    def feature_l1(self, reduction: str = "sum"):
         l1 = self.neuron_tokenizer.embedding.weight.abs()
         if reduction == "sum":
             l1 = l1.sum()
@@ -182,7 +201,7 @@ class AttentionReadout(Readout):
     def regularizer(self, reduction: str = "sum"):
         reg_term = self.reg_scale * self.feature_l1(reduction=reduction)
         
-        # add L1 regularization for neuron projection weights
+        # l1 regularization for neuron projection weights
         l1 = self.neuron_projection.weight.abs()
         if reduction == "sum":
             l1 = l1.sum()
