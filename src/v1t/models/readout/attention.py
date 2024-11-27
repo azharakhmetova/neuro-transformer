@@ -27,14 +27,16 @@ class CrossAttention(nn.Module):
         use_bias: bool = True,
         grad_checkpointing: bool = True,
         scale: bool = False,
+        use_pos_embedding: bool = True
     ):
         super(CrossAttention, self).__init__()
         self.grad_checkpointing = grad_checkpointing
+        self.use_pos_embedding = use_pos_embedding
 
         inner_dim = emb_dim * num_heads
 
-        self.layer_norm_q = nn.LayerNorm((num_neurons, emb_dim))  # Normalize queries
-        self.layer_norm_kv = nn.LayerNorm((input_shape[1]*input_shape[2], emb_dim))  # Normalize keys/values
+        self.layer_norm_q = nn.LayerNorm((num_neurons, emb_dim))  
+        self.layer_norm_kv = nn.LayerNorm((input_shape[1]*input_shape[2], emb_dim)) 
 
         self.to_q = nn.Linear(
             in_features=emb_dim, out_features=inner_dim, bias=False
@@ -42,6 +44,10 @@ class CrossAttention(nn.Module):
         self.to_kv = nn.Linear(
                 in_features=emb_dim, out_features=inner_dim * 2, bias=False
             ) 
+        
+        self.positional_embedding = nn.Parameter(
+            torch.randn(1, input_shape[1]*input_shape[2], emb_dim)
+        ) if use_pos_embedding else None
         
         self.rearrange = Rearrange("b n (h d) -> b h n d", h=num_heads)
         self.attend = nn.Softmax(dim=-1)
@@ -69,6 +75,9 @@ class CrossAttention(nn.Module):
         q = self.layer_norm_q(q)
         kv = self.layer_norm_kv(kv)
 
+        if self.use_pos_embedding:
+            kv += self.positional_embedding
+
         q = self.to_q(q)  # [B, N_q, D]
         k, v = torch.chunk(self.to_kv(kv), chunks=2, dim=-1)  # [B, P, D], [B, P, D]
 
@@ -78,7 +87,7 @@ class CrossAttention(nn.Module):
 
         outputs = self.scaled_dot_product_attention(q=q, k=k, v=v)  # [B, H, N_q, D_h]
         outputs = rearrange(outputs, "b h n d -> b n (h d)")  # [B, N_q, D]
-        return self.projection(outputs)  # Project back to original embedding space
+        return self.projection(outputs)  # project back to original embedding space
 
     def forward(self, q: torch.Tensor, kv: torch.Tensor):
         if self.grad_checkpointing:
@@ -117,6 +126,7 @@ class AttentionReadout(Readout):
         use_bias: bool = True,
         scale: bool = False,
         grad_checkpointing: bool = False,
+        use_pos_embedding: bool = True,
         name: str = "AttentionReadout",
     ):
         super(AttentionReadout, self).__init__(
@@ -140,6 +150,7 @@ class AttentionReadout(Readout):
             use_bias=use_bias,
             grad_checkpointing=grad_checkpointing,
             scale=scale,
+            use_pos_embedding=use_pos_embedding
         )
 
         self.dropout = nn.Dropout(p=dropout)
