@@ -326,7 +326,7 @@ def wandb_init(args, wandb_sweep: bool):
             wandb.init(
                 config=config,
                 project="sensorium",
-                entity="azhar-akhmetova",
+                entity="azharakhmetova-master-thesis",
                 group=args.wandb_group,
                 name=os.path.basename(args.output_dir),
             )

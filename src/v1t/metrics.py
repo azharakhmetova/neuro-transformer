@@ -29,13 +29,17 @@ class Metrics:
         self.neuron_ids = deepcopy(ds.dataset.neuron_ids)
         self.trial_ids = results["trial_ids"]
         if not self.hashed:
-            self.trial_ids = self.trial_ids.numpy()
+            if isinstance(self.trial_ids, list):
+                self.trial_ids = np.array(self.trial_ids)
+                self.trial_ids = self.trial_ids
             self.order()
 
     def order(self):
         """Re-order the responses based on trial IDs and neuron IDs."""
-        trial_ids = np.argsort(self.trial_ids)
-        neuron_ids = np.argsort(self.neuron_ids)
+        trial_ids = np.argsort(self.trial_ids.squeeze())
+        print(trial_ids.shape)
+        neuron_ids = np.argsort(self.neuron_ids.squeeze())
+        print(trial_ids.shape)
 
         self.targets = self.targets[trial_ids, :][:, neuron_ids]
         self.predictions = self.predictions[trial_ids, :][:, neuron_ids]
