@@ -59,7 +59,7 @@ class CrossAttention(nn.Module):
 
         # LayerNorm for queries and inputs
         self.layer_norm = nn.LayerNorm(self.emb_dim)
-        self.layer_norm_inputs = nn.LayerNorm(self.input_shape[0])
+        self.layer_norm_inputs = nn.LayerNorm(self.input_shape[0]) #((self.input_shape[1] * self.input_shape[2],self.input_shape[0]))
 
         # Key/Value projection layer (if enabled)
         if self.key_embedding and self.value_embedding:
@@ -69,7 +69,7 @@ class CrossAttention(nn.Module):
 
         # Optional positional embedding
         self.positional_embedding = nn.Parameter(
-            torch.randn(1, input_shape[1] * input_shape[2], input_shape[0])
+            torch.randn(1, self.input_shape[1] * self.input_shape[2], self.input_shape[0])
         ) if use_pos_embedding else None
 
         # Reshaping utility for attention
@@ -165,7 +165,7 @@ class AttentionReadout(Readout):
             args, input_shape=input_shape, output_shape=output_shape, ds=ds, name=name
         )
 
-        emb_dim = 160  # embedding dimension for readout
+        emb_dim = 80  # embedding dimension for readout
 
         self.cross_attention = CrossAttention(
             input_shape=input_shape,
