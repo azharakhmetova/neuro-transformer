@@ -55,9 +55,11 @@ def train_step(
     result = {"loss/loss": [], "loss/reg_loss": [], "loss/total_loss": []}
     for micro_batch in data.micro_batching(batch, micro_batch_size):
         with autocast(enabled=scaler.is_enabled(), dtype=torch.float16):
+            print("micro_batch['response']:", micro_batch["response"].shape)
             y_true = micro_batch["response"].to(device)
             y_pred, _, _ = model(
                 inputs=micro_batch["image"].to(device),
+                neuron_inputs=micro_batch["response"].to(device),
                 mouse_id=mouse_id,
                 behaviors=micro_batch["behavior"].to(device),
                 pupil_centers=micro_batch["pupil_center"].to(device),
@@ -131,10 +133,12 @@ def validation_step(
     result = {"loss/loss": [], "loss/reg_loss": [], "loss/total_loss": []}
     targets, predictions = [], []
     for micro_batch in data.micro_batching(batch, micro_batch_size):
+        print("micro_batch: ", micro_batch["response"].shape)
         with autocast(enabled=scaler.is_enabled(), dtype=torch.float16):
             y_true = micro_batch["response"].to(device)
             y_pred, _, _ = model(
                 inputs=micro_batch["image"].to(device),
+                neuron_inputs=micro_batch["response"].to(device),
                 mouse_id=mouse_id,
                 behaviors=micro_batch["behavior"].to(device),
                 pupil_centers=micro_batch["pupil_center"].to(device),
@@ -517,8 +521,13 @@ if __name__ == "__main__":
         "3 - shift input to both core and readout module"
         "4 - shift_mode=3 and provide both behavior and pupil center to cropper",
     )
+    parser.add_argument("--tokenize_neurons", type=int, default=0, choices=[0, 1])
 
     temp_args = parser.parse_known_args()[0]
+
+    if temp_args.tokenize_neurons == 1:
+        parser.add_argument("--emb_dim_tokenizer", type=int, default=150)
+        parser.add_argument("--frac_input_neurons", type=float, default=0.5)
 
     # hyper-parameters for core module
     match temp_args.core:
@@ -558,6 +567,56 @@ if __name__ == "__main__":
                 default=1,
                 help="stride size to extract patches",
             )
+            parser.add_argument("--num_blocks", type=int, default=4)
+            parser.add_argument("--num_heads", type=int, default=4)
+            parser.add_argument("--emb_dim", type=int, default=155)
+            parser.add_argument("--mlp_dim", type=int, default=488)
+            parser.add_argument(
+                "--p_dropout",
+                type=float,
+                default=0.0229,
+                help="patch embeddings dropout",
+            )
+            parser.add_argument(
+                "--t_dropout", type=float, default=0.2544, help="ViT block dropout"
+            )
+            parser.add_argument(
+                "--drop_path",
+                type=float,
+                default=0.0,
+                help="stochastic depth dropout rate",
+            )
+            parser.add_argument(
+                "--use_lsa", action="store_true", help="Use Locality Self Attention"
+            )
+            parser.add_argument(
+                "--disable_bias",
+                action="store_true",
+                help="Disable bias terms in linear layers in ViT.",
+            )
+            parser.add_argument("--core_reg_scale", type=float, default=0.5379)
+            parser.add_argument("--lr", type=float, default=0.001647)
+            parser.add_argument("--core_lr", type=float, default=None)
+        case "multimodalvit":
+            parser.add_argument("--patch_size", type=int, default=8)
+            parser.add_argument(
+                "--patch_mode",
+                type=int,
+                default=0,
+                choices=[0, 1, 2, 3],
+                help="patch embedding mode:"
+                "0 - nn.Unfold to extract patches"
+                "1 - nn.Conv2D to extract patches"
+                "2 - Shifted Patch Tokenization https://arxiv.org/abs/2112.13492v1"
+                "3 - nn.Unfold with Dual PatchNorm https://openreview.net/forum?id=jgMqve6Qhw",
+            )
+            parser.add_argument(
+                "--patch_stride",
+                type=int,
+                default=1,
+                help="stride size to extract patches",
+            )
+            parser.add_argument("--samples_per_token", type=int, default=1)
             parser.add_argument("--num_blocks", type=int, default=4)
             parser.add_argument("--num_heads", type=int, default=4)
             parser.add_argument("--emb_dim", type=int, default=155)
@@ -650,7 +709,10 @@ if __name__ == "__main__":
         # parser.add_argument("--num_heads", type=int, default=4)
         # parser.add_argument("--emb_dim", type=int, default=155)
         parser.add_argument("--readout_reg_scale", type=float, default=0.0076)
-        parser.add_argument("--dropout", type=float, default=0.2544)
+        parser.add_argument("--r_dropout", type=float, default=0.2544)
+        parser.add_argument("--emb_dim_readout", type=int, default=160)
+        parser.add_argument("--key_embedding", type=int, default=1)
+        parser.add_argument("--value_embedding", type=int, default=1)
     else:
         parser.add_argument("--readout_reg_scale", type=float, default=0.0)
 

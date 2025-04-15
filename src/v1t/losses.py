@@ -155,12 +155,13 @@ class PoissonLoss(Loss):
         y_true: torch.Tensor,
         y_pred: torch.Tensor,
         mouse_id: str,
+        query_neuron_ids: t.Optional[torch.Tensor] = None,
         batch_size: int = None,
     ):
         if batch_size is None:
             batch_size = y_true.size(0)
         # add eps to targets and predictions to avoid numeric instability
-        y_true, y_pred = y_true + self.eps, y_pred + self.eps
+        y_true, y_pred = y_true[query_neuron_ids] + self.eps, y_pred[query_neuron_ids] + self.eps
         loss = torch.sum(y_pred - y_true * torch.log(y_pred))
         loss = self.scale_ds(loss, mouse_id=mouse_id, batch_size=batch_size)
         return loss
@@ -179,6 +180,7 @@ class Correlation(Loss):
         y_true: torch.Tensor,
         y_pred: torch.Tensor,
         mouse_id: str,
+        query_neuron_ids: t.Optional[torch.Tensor] = None,
         batch_size: int = None,
     ):
         if batch_size is None:

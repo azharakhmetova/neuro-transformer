@@ -1,0 +1,18 @@
+usage: train.py [-h] --dataset DATASET --output_dir OUTPUT_DIR
+                [--mouse_ids MOUSE_IDS [MOUSE_IDS ...]] --behavior_mode
+                {0,1,2,3,4} [--center_crop CENTER_CROP] [--resize_image {0,1}]
+                [--gray_scale] [--limit_data LIMIT_DATA]
+                [--num_workers NUM_WORKERS] [--epochs EPOCHS]
+                [--batch_size BATCH_SIZE]
+                [--micro_batch_size MICRO_BATCH_SIZE]
+                [--device {cpu,cuda,cuda:0,cuda:1,cuda:2,cuda:3,cuda:4,cuda:5,cuda:6,mps}]
+                [--seed SEED] [--amp] [--backend {inductor,hidet}]
+                [--grad_checkpointing {0,1}] [--deterministic]
+                [--adam_beta1 ADAM_BETA1] [--adam_beta2 ADAM_BETA2]
+                [--adam_eps ADAM_EPS] [--criterion CRITERION]
+                [--ds_scale {0,1}] [--pretrain_core PRETRAIN_CORE]
+                [--save_plots] [--dpi DPI] [--format {pdf,svg,png}]
+                [--use_wandb] [--wandb_group WANDB_GROUP] [--clear_output_dir]
+                [--verbose {0,1,2,3}] --core CORE --readout READOUT
+                [--shift_mode {0,1,2,3,4}] [--tokenize_neurons {0,1}]
+train.py: error: argument --tokenize_neurons: invalid int value: '1ls'

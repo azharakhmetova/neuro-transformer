@@ -239,7 +239,7 @@ class Gaussian2DReadout(Readout):
         inputs: torch.Tensor,
         sample: bool = None,
         neuron_ids: torch.Tensor = None, 
-        query_neuron_subset: bool = False,
+        neuron_id_tokenizer: t.Any = None,
         shifts: torch.Tensor = None,
     ):
         """

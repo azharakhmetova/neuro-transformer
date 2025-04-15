@@ -131,6 +131,7 @@ class Summary(object):
         self.dpi = args.dpi
         self.format = args.format
         self.save_plots = args.save_plots
+        self.frac_input_neurons = args.frac_input_neurons
 
         # create SummaryWriter for train, validation and test set
         self.writers = [
@@ -237,8 +238,9 @@ class Summary(object):
         label_fontsize, tick_fontsize = 10, 9
         figure = plt.figure(figsize=(10, 1.8 * num_samples), dpi=self.dpi)
         sub_figures = figure.subfigures(nrows=num_samples, ncols=1, hspace=hspace)
-        num_neurons = results["predictions"].shape[1]
+        num_neurons = int(results["predictions"].shape[1] * (1-self.frac_input_neurons))
         x_axis = np.arange(num_neurons)
+        print( "x_axis", x_axis.shape)
 
         # the (x, y) coordinates in crop_grids are in range [-1, 1]
         # need to convert to [0, 144] and [0, 256] in height and width
@@ -260,8 +262,9 @@ class Summary(object):
             image = results["images"][i]
             crop_image = results["crop_images"][i]
             image_grid = image_grids[i]
-            target = results["targets"][i]
-            prediction = results["predictions"][i]
+            target = results["targets"][i][:num_neurons]
+            print("target", target.shape)
+            prediction = results["predictions"][i][:num_neurons]
             pupil_center = results["pupil_center"][i]
             behavior = results["behaviors"][i]
             axes[0].scatter(

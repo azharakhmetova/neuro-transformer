@@ -10,6 +10,7 @@ from einops import rearrange, repeat, einsum
 from torch.utils.checkpoint import checkpoint
 
 from v1t.models.utils import DropPath
+from v1t.models.neuron_processing import SimpleResponsesTokenizer
 
 
 class PatchShifting(nn.Module):
@@ -426,11 +427,114 @@ class ViTCore(Core):
         mouse_id: str,
         behaviors: torch.Tensor,
         pupil_centers: torch.Tensor,
+        neuron_inputs: torch.Tensor = None,
+        input_neuron_ids: torch.Tensor = None,
     ):
         outputs = self.patch_embedding(inputs)
         if self.behavior_mode in (3, 4):
             behaviors = torch.cat((behaviors, pupil_centers), dim=-1)
         outputs = self.transformer(outputs, mouse_id=mouse_id, behaviors=behaviors)
         outputs = outputs[:, 1:, :]  # remove CLS token
+        # add flag to rearrange only if it is a gaussian readout
+        outputs = self.rearrange(outputs)
+        return outputs
+
+@register("multimodalvit")
+class MultiModalViTCore(Core):
+    # todo
+    # add modality embedding?
+    def __init__(
+        self,
+        args,
+        input_shape: t.Tuple[int, int, int],
+        num_neurons,
+        num_samples_per_neuron,
+        name: str = "MultiModalViTCore",
+    ):
+        super(MultiModalViTCore, self).__init__(args, input_shape=input_shape, name=name)
+        self.register_buffer("reg_scale", torch.tensor(args.core_reg_scale))
+        self.behavior_mode = args.behavior_mode
+
+        if not hasattr(args, "grad_checkpointing"):
+            args.grad_checkpointing = False
+        elif args.grad_checkpointing is None:
+            args.grad_checkpointing = "cuda" in args.device.type
+        if args.grad_checkpointing and args.verbose:
+            print(f"Enable gradient checkpointing in MultiModalViT")
+
+        self.patch_embedding = Image2Patches(
+            image_shape=input_shape,
+            patch_mode=args.patch_mode,
+            patch_size=args.patch_size,
+            stride=args.patch_stride,
+            emb_dim=args.emb_dim,
+            dropout=args.p_dropout,
+        )
+        self.neuron_embedding = SimpleResponsesTokenizer(
+            args,
+            num_neurons=num_neurons,
+            num_samples_per_neuron=num_samples_per_neuron,
+            frac_input_neurons=args.frac_input_neurons,
+            samples_per_token=args.samples_per_token,
+            token_dim=args.emb_dim,
+            device=args.device,
+            use_masking=None,
+        )
+        self.transformer = Transformer(
+            input_shape=(self.patch_embedding.output_shape[0] + self.neuron_embedding.output_shape[0], self.patch_embedding.output_shape[1]),
+            emb_dim=args.emb_dim,
+            num_blocks=args.num_blocks,
+            num_heads=args.num_heads,
+            mlp_dim=args.mlp_dim,
+            dropout=args.t_dropout,
+            behavior_mode=self.behavior_mode,
+            mouse_ids=list(args.output_shapes.keys()),
+            use_lsa=args.use_lsa,
+            drop_path=args.drop_path,
+            use_bias=not args.disable_bias,
+            grad_checkpointing=args.grad_checkpointing,
+        )
+        # calculate latent height and width based on number of tokens 
+        n_tokens=self.patch_embedding.num_patches + self.neuron_embedding.output_shape[0] - 1
+        h, w = self.find_shape(n_tokens)
+        print("patch_embedding.num_patches", self.patch_embedding.num_patches)
+        print("neuron_embedding.num_tokens", self.neuron_embedding.num_tokens)
+        print("h", h)
+        print("w", w)
+        self.rearrange = Rearrange("b (h w) c -> b c h w", h=h, w=w)
+        self.output_shape = (self.transformer.output_shape[-1], h, w)
+
+    @staticmethod
+    def find_shape(num_patches: int):
+        dim1 = math.ceil(math.sqrt(num_patches))
+        while num_patches % dim1 != 0 and dim1 > 0:
+            dim1 -= 1
+        dim2 = num_patches // dim1
+        return dim1, dim2
+
+    def regularizer(self):
+        """L1 regularization"""
+        return self.reg_scale * sum(p.abs().sum() for p in self.parameters())
+
+    def forward(
+        self,
+        inputs: torch.Tensor,
+        neuron_inputs: torch.Tensor,
+        input_neuron_ids: torch.Tensor,
+        mouse_id: str,
+        behaviors: torch.Tensor,
+        pupil_centers: torch.Tensor,
+         neuron_id_tokenizer: t.Any = None,
+    ):
+        outputs = self.patch_embedding(inputs)
+        print("outputs.shape after patch emb", outputs.shape)
+        outputs = torch.cat((outputs, self.neuron_embedding(neuron_inputs, input_neuron_ids.to(torch.long), neuron_id_tokenizer)), dim=1)
+        print("outputs.shape after neuron emb", outputs.shape)
+        if self.behavior_mode in (3, 4):
+            behaviors = torch.cat((behaviors, pupil_centers), dim=-1)
+        outputs = self.transformer(outputs, mouse_id=mouse_id, behaviors=behaviors)
+        print("outputs.shape after transformer", outputs.shape)
+        outputs = outputs[:, 1:, :]  # remove CLS token
+        # add flag to rearrange only if it is a gaussian readout
         outputs = self.rearrange(outputs)
         return outputs

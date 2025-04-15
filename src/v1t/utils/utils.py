@@ -231,6 +231,7 @@ def plot_samples(
                 images = micro_batch["image"]
                 predictions, crop_images, image_grids = model(
                     inputs=images.to(device),
+                    neuron_inputs=micro_batch["response"].to(device),
                     mouse_id=mouse_id,
                     pupil_centers=micro_batch["pupil_center"].to(device),
                     behaviors=micro_batch["behavior"].to(device),
@@ -440,6 +441,7 @@ def compute_micro_batch_size(
                     for _ in range(micro_iterations):
                         outputs, _, _ = model(
                             inputs=random_input((micro_batch_size, *image_shape)),
+                            neuron_inputs=random_input((micro_batch_size, list(model.output_shapes.items())[0][1][0])),
                             mouse_id=mouse_id,
                             behaviors=random_input((micro_batch_size, 3)),
                             pupil_centers=random_input((micro_batch_size, 2)),

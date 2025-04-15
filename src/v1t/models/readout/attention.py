@@ -12,6 +12,7 @@ from torch.utils.checkpoint import checkpoint
 import warnings
 
 from v1t.models.utils import DropPath
+from v1t.models.neuron_processing import NeuronIDTokenizer
 
 REDUCTIONS = t.Literal["sum", "mean", None]
 
@@ -131,13 +132,14 @@ class CrossAttention(nn.Module):
         return outputs
 
 
-class NeuronTokenizer(nn.Module):
-    def __init__(self, num_neurons: int, emb_dim: int):
-        super(NeuronTokenizer, self).__init__()
-        self.embedding = nn.Embedding(num_neurons, emb_dim)
+# class NeuronIDTokenizer(nn.Module):
+#     def __init__(self, num_neurons: int, emb_dim: int):
+#         super(NeuronIDTokenizer, self).__init__()
+#         self.embedding = nn.Embedding(num_neurons, emb_dim)
+#         nn.init.constant_(self.embedding.weight, 1.0 / num_neurons)
 
-    def forward(self, neuron_ids: torch.Tensor):
-        return self.embedding(neuron_ids)
+#     def forward(self, neuron_ids: torch.Tensor):
+#         return self.embedding(neuron_ids)
 
 
 @register("attention")
@@ -164,42 +166,55 @@ class AttentionReadout(Readout):
         super(AttentionReadout, self).__init__(
             args, input_shape=input_shape, output_shape=output_shape, ds=ds, name=name
         )
-
-        emb_dim = 80  # embedding dimension for readout
+        emb_dim_r = args.emb_dim_readout 
 
         self.cross_attention = CrossAttention(
             input_shape=input_shape,
             num_neurons=self.num_neurons,
-            emb_dim=emb_dim,
+            emb_dim=emb_dim_r,
             num_heads=num_heads,
-            dropout=dropout,
+            dropout=args.r_dropout,
             use_lsa=use_lsa,
             use_bias=use_bias,
             grad_checkpointing=grad_checkpointing,
-            key_embedding=key_embedding,
-            value_embedding=value_embedding,
+            key_embedding=args.key_embedding,
+            value_embedding=args.value_embedding,
             scale=scale,
             temperature=temperature,
             use_pos_embedding=use_pos_embedding
         )
 
-        self.dropout = nn.Dropout(p=dropout)
-        self.neuron_tokenizer = NeuronTokenizer(num_neurons=self.num_neurons, emb_dim=emb_dim)
-        self.neuron_projection = nn.Linear(in_features=emb_dim, out_features=1, bias=True)
+        self.dropout = nn.Dropout(p=args.r_dropout)
+        self.project_neuron_queries = emb_dim_r != args.emb_dim_tokenizer
+        if self.project_neuron_queries:
+            self.neuron_query_projection = nn.Linear(args.emb_dim_tokenizer, emb_dim_r, bias=True)
+        self.neuron_projection = nn.Linear(in_features=emb_dim_r, out_features=1, bias=True)
 
-    def forward(self, inputs: torch.Tensor, neuron_ids: torch.Tensor = None, query_neuron_subset: bool = False, shifts: torch.Tensor = None): 
+        if args.grad_checkpointing and args.verbose:
+            print(f"Enable gradient checkpointing in attention readout")
+
+    def forward(
+            self, 
+            inputs: torch.Tensor, 
+            neuron_ids: torch.Tensor = None, 
+            neuron_id_tokenizer: t.Any = None, 
+            shifts: torch.Tensor = None
+    ): 
         b, c, w, h = inputs.size()
         c_in, w_in, h_in = self.input_shape
 
         if (c_in, w_in, h_in) != (c, w, h):
             warnings.warn("Mismatch between expected and actual input shape.")
 
-        if not query_neuron_subset:
+        if neuron_ids is None:
             neuron_ids = torch.arange(self.num_neurons, device=inputs.device).unsqueeze(0).expand(b, -1)
         else:
-            neuron_ids = torch.tensor(neuron_ids, device=inputs.device).unsqueeze(0).expand(b, -1)
+            neuron_ids = neuron_ids.clone().detach().to(inputs.device).unsqueeze(0).expand(b, -1)
+#neuron_ids = torch.tensor(neuron_ids, device=inputs.device).unsqueeze(0).expand(b, -1)
 
-        neuron_queries = self.neuron_tokenizer(neuron_ids)
+        neuron_queries = neuron_id_tokenizer(neuron_ids)
+        if self.project_neuron_queries:
+            neuron_queries = self.neuron_query_projection(neuron_queries)
         neuron_queries = self.dropout(neuron_queries)
 
         inputs = rearrange(inputs, 'b c h w -> b (h w) c')  # flatten spatial dims
@@ -210,9 +225,9 @@ class AttentionReadout(Readout):
 
         return outputs
 
-    def feature_l1(self, reduction: str = "sum"):
-        l1 = self.neuron_tokenizer.embedding.weight.abs()
-        return l1.sum() if reduction == "sum" else l1.mean()
+    # def feature_l1(self, reduction: str = "sum"):
+    #     l1 = self.neuron_id_tokenizer.embedding.weight.abs()
+    #     return l1.sum() if reduction == "sum" else l1.mean()
 
     def regularizer(self, reduction: str = "sum"):
         reg_term = self.reg_scale * self.feature_l1(reduction=reduction)

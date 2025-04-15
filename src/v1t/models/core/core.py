@@ -52,6 +52,8 @@ class Core(nn.Module):
     def forward(
         self,
         inputs: torch.Tensor,
+        neuron_inputs: torch.Tensor,
+        input_neuron_ids: torch.Tensor,
         mouse_id: str,
         behaviors: torch.Tensor,
         pupil_centers: torch.Tensor,

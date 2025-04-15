@@ -7,10 +7,12 @@ from torch import nn
 import torch.distributed
 from torch.utils.data import DataLoader
 import numpy as np
-
+from functools import partial
 
 from v1t.models.core import get_core
 from v1t.models.readout import Readouts
+from v1t.models.neuron_processing import NeuronIDTokenizer
+from v1t.models.neuron_processing import SampleNeuronIDs
 from v1t.utils.tensorboard import Summary
 from v1t.models.core_shifter import CoreShifters
 from v1t.models.image_cropper import ImageCropper
@@ -19,7 +21,7 @@ from v1t.models.utils import ELU1, load_pretrain_core
 
 def get_model_info(
     model: nn.Module,
-    input_data: t.Union[torch.Tensor, t.Sequence[t.Any], t.Mapping[str, t.Any]],
+    input_data: t.Union[torch.Tensor, t.Sequence[t.Any], t.Mapping[str, t.Any], t.Any],#, torch.Tensor],#, torch.Tensor],
     mouse_id: str = None,
     filename: str = None,
     summary: Summary = None,
@@ -28,7 +30,7 @@ def get_model_info(
 ):
     args = {
         "model": model,
-        "input_data": input_data,
+        "input_data": input_data, 
         "depth": 5,
         "device": device,
         "verbose": 0,
@@ -67,18 +69,43 @@ class Model(nn.Module):
         self.input_shape = args.input_shape
         self.output_shapes = args.output_shapes
         self.shift_mode = args.shift_mode
+        self.readout_type = args.readout
+        self.core_type = args.core
+        self.tokenize_neurons = args.tokenize_neurons
+        self.emb_dim_tokenizer = args.emb_dim_tokenizer
+        self.frac_input_neurons = args.frac_input_neurons
+        self.micro_batch_size = args.micro_batch_size
+        print("tokenize neurons: ", self.tokenize_neurons)
+        if self.tokenize_neurons == 1:
+            self.neuron_id_tokenizer = NeuronIDTokenizer(num_neurons=list(self.output_shapes.items())[0][1][0], emb_dim=args.emb_dim_tokenizer, device=args.device)
+            print(self.neuron_id_tokenizer)
+            self.neuron_id_sampler = SampleNeuronIDs(num_neurons=list(self.output_shapes.items())[0][1][0], frac_input_neurons=args.frac_input_neurons, device=args.device)
 
         self.add_module(
             "image_cropper",
             module=ImageCropper(args, ds=ds),
         )
-        self.add_module(
-            name="core",
-            module=get_core(args)(
-                args,
-                input_shape=self.image_cropper.output_shape,
-            ),
-        )
+        print("core: ", self.core_type)
+        if self.core_type == "multimodalvit":
+            print("here")
+            self.add_module(
+                name="core",
+                module=get_core(args)(
+                    args,
+                    input_shape=self.image_cropper.output_shape,
+                    num_neurons=list(self.output_shapes.items())[0][1][0],
+                    num_samples_per_neuron=1,
+                ),
+            )
+            print("here 2")
+        else:
+            self.add_module(
+                name="core",
+                module=get_core(args)(
+                    args,
+                    input_shape=self.image_cropper.output_shape,
+                ),
+            )
         if self.shift_mode in (2, 3, 4):
             self.add_module(
                 "core_shifter",
@@ -156,6 +183,7 @@ class Model(nn.Module):
         behaviors: torch.Tensor,
         pupil_centers: torch.Tensor,
         neuron_inputs: torch.Tensor = None,
+        dummy: bool = False,
         activate: bool = True,
     ):
         images, image_grids = self.image_cropper(
@@ -164,25 +192,58 @@ class Model(nn.Module):
             behaviors=behaviors,
             pupil_centers=pupil_centers,
         )
+        if not dummy and self.tokenize_neurons:
+            input_neuron_ids, query_neuron_ids = self.neuron_id_sampler()
+            print("input neuron ids: ", input_neuron_ids.shape)
+            print("input_neuron_ids dtype:", input_neuron_ids.dtype)
+            print("input_neuron_ids device:", input_neuron_ids.device)
+            print("query neuron ids: ", query_neuron_ids.shape)
+        elif dummy and self.tokenize_neurons:
+            print("dummy forward pass")
+            input_neuron_ids = torch.arange(int(self.frac_input_neurons * list(self.output_shapes.items())[0][1][0])).view(-1)
+            query_neuron_ids = torch.arange(int(self.frac_input_neurons * list(self.output_shapes.items())[0][1][0]), list(self.output_shapes.items())[0][1][0]).view(-1)
+            # self.neuron_id_tokenizer = lambda neuron_ids: torch.zeros(neuron_ids.size(0), self.emb_dim_tokenizer, device="cpu")
+        else:
+            input_neuron_ids = None
+            query_neuron_ids = None
+        
+
+        if self.core_type == "multimodalvit" and neuron_inputs is not None:
+            if neuron_inputs.dim() != 3:
+                neuron_inputs = neuron_inputs.unsqueeze(-1)
+            print("neuron inputs: ", neuron_inputs.shape)
         outputs = self.core(
-            images,
+            inputs=images,
+            neuron_inputs=neuron_inputs,
+            input_neuron_ids=input_neuron_ids,
+            neuron_id_tokenizer=self.neuron_id_tokenizer,
             mouse_id=mouse_id,
             behaviors=behaviors,
             pupil_centers=pupil_centers,
-        )
+        )    
+        print("outputs after core: ", outputs.shape)
         shifts = None
         if self.core_shifter is not None:
             shifts = self.core_shifter(pupil_centers, mouse_id=mouse_id)
-        neuron_ids = None#np.array([0, 1, 2, 3, 4])
-        query_neuron_subset = False#True 
-        outputs = self.readouts(outputs, mouse_id=mouse_id, neuron_ids=neuron_ids, query_neuron_subset=query_neuron_subset, shifts=shifts)
+        if self.readout_type == "attention":
+            outputs = self.readouts(outputs, mouse_id=mouse_id, neuron_ids=query_neuron_ids.to(torch.long), neuron_id_tokenizer=self.neuron_id_tokenizer, shifts=shifts)
+            print("outputs after attention readout: ", outputs.shape)
+        else:
+            outputs = self.readouts(outputs, mouse_id=mouse_id, shifts=shifts)
+            print("outputs after gaussian readout: ", outputs.shape)
         if activate:
             outputs = self.elu1(outputs)
         return outputs, images, image_grids
 
 
 def get_model(args, ds: t.Dict[str, DataLoader], summary: Summary = None) -> Model:
+    print("get_model called", flush=True)
     model = Model(args, ds=ds)
+    # model.to(args.device)
+    print("Model device: ", model.device)
+    for name, param in model.named_parameters():
+        if param.device.type == 'cpu':
+            print(f"{name} is on {param.device}")
 
     if hasattr(args, "pretrain_core") and args.pretrain_core:
         load_pretrain_core(args, model=model, device=args.device)
@@ -192,12 +253,19 @@ def get_model(args, ds: t.Dict[str, DataLoader], summary: Summary = None) -> Mod
     mouse_id = args.mouse_ids[0]
     batch_size = args.micro_batch_size
     random_input = lambda size: torch.rand(*size)
+    
+    model.core.forward = partial(model.core.forward, neuron_id_tokenizer=model.neuron_id_tokenizer)
+    for key, readout in model.readouts.items():
+        readout.forward = partial(readout.forward, neuron_id_tokenizer=model.neuron_id_tokenizer)
     model_info = get_model_info(
         model=model,
         input_data={
             "inputs": random_input((batch_size, *model.input_shape)),
             "behaviors": random_input((batch_size, 3)),
             "pupil_centers": random_input((batch_size, 2)),
+            "neuron_inputs": random_input((batch_size, list(model.output_shapes.items())[0][1][0], 1)),
+            "dummy": True,
+            # "input_neuron_ids": random_input((batch_size, int(model.frac_input_neurons*list(model.output_shapes.items())[0][1][0]))),
         },
         mouse_id=mouse_id,
         filename=os.path.join(args.output_dir, "model.txt"),
@@ -214,6 +282,9 @@ def get_model(args, ds: t.Dict[str, DataLoader], summary: Summary = None) -> Mod
             "inputs": random_input((batch_size, *model.core.input_shape)),
             "behaviors": random_input((batch_size, 3)),
             "pupil_centers": random_input((batch_size, 2)),
+            "neuron_inputs": random_input((batch_size, list(model.output_shapes.items())[0][1][0], 1)),
+            "input_neuron_ids": torch.arange(int(model.frac_input_neurons * list(model.output_shapes.items())[0][1][0]), device="cpu").view(-1), #.repeat(batch_size),
+            # "neuron_id_tokenizer": lambda neuron_ids: torch.zeros(neuron_ids.size(0), args.emb_dim_tokenizer, device="cpu"),
         },
         mouse_id=mouse_id,
         filename=os.path.join(args.output_dir, "model_core.txt"),
@@ -223,7 +294,9 @@ def get_model(args, ds: t.Dict[str, DataLoader], summary: Summary = None) -> Mod
     # get readout summary
     get_model_info(
         model=model.readouts[mouse_id],
-        input_data={"inputs": random_input((batch_size, *model.core.output_shape))},
+        input_data={
+            "inputs": random_input((batch_size, *model.core.output_shape)),
+            },
         filename=os.path.join(args.output_dir, "model_readout.txt"),
         summary=summary,
         tag=f"model/trainable_parameters/Mouse{mouse_id}Readout",
