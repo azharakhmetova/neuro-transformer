@@ -85,6 +85,9 @@ def inference(
         for micro_batch in data.micro_batching(batch, batch_size=micro_batch_size):
             predictions, _, _ = model(
                 inputs=micro_batch["image"].to(device),
+                neuron_inputs=micro_batch["response"].to(device),
+                input_neuron_ids=micro_batch["input_neuron_ids"].to(device),
+                query_neuron_ids=micro_batch["query_neuron_ids"].to(device),
                 mouse_id=mouse_id,
                 behaviors=micro_batch["behavior"].to(device),
                 pupil_centers=micro_batch["pupil_center"].to(device),
@@ -209,6 +212,7 @@ def plot_samples(
     mode: int = 1,
     num_plots: int = 5,
 ):
+    print("plotting samples...")
     device = args.device
     model.to(device)
     model.train(False)
@@ -232,6 +236,8 @@ def plot_samples(
                 predictions, crop_images, image_grids = model(
                     inputs=images.to(device),
                     neuron_inputs=micro_batch["response"].to(device),
+                    input_neuron_ids=micro_batch["input_neuron_ids"].to(device),
+                    query_neuron_ids=micro_batch["query_neuron_ids"].to(device),
                     mouse_id=mouse_id,
                     pupil_centers=micro_batch["pupil_center"].to(device),
                     behaviors=micro_batch["behavior"].to(device),
@@ -404,7 +410,7 @@ def compute_micro_batch_size(
     if hasattr(args, "micro_batch_size") and args.micro_batch_size:
         assert args.micro_batch_size <= args.batch_size
         return
-
+    print("computing micro batch size...")
     device = args.device
     if "cuda" not in device.type:
         args.micro_batch_size = args.batch_size
@@ -442,6 +448,8 @@ def compute_micro_batch_size(
                         outputs, _, _ = model(
                             inputs=random_input((micro_batch_size, *image_shape)),
                             neuron_inputs=random_input((micro_batch_size, list(model.output_shapes.items())[0][1][0])),
+                            input_neuron_ids=torch.arange(int(args.frac_input_neurons * args.output_shapes[mouse_id][0])).view(-1).to(device),
+                            query_neuron_ids=torch.arange(int(args.frac_input_neurons * args.output_shapes[mouse_id][0]), args.output_shapes[mouse_id][0]).view(-1).to(device),
                             mouse_id=mouse_id,
                             behaviors=random_input((micro_batch_size, 3)),
                             pupil_centers=random_input((micro_batch_size, 2)),

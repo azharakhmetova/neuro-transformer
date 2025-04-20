@@ -56,21 +56,25 @@ def train_step(
     for micro_batch in data.micro_batching(batch, micro_batch_size):
         with autocast(enabled=scaler.is_enabled(), dtype=torch.float16):
             print("micro_batch['response']:", micro_batch["response"].shape)
+            print("micro_batch['input_neuron_ids']:", micro_batch["input_neuron_ids"].shape)
             y_true = micro_batch["response"].to(device)
             y_pred, _, _ = model(
                 inputs=micro_batch["image"].to(device),
                 neuron_inputs=micro_batch["response"].to(device),
+                input_neuron_ids=micro_batch["input_neuron_ids"].to(device),
+                query_neuron_ids=micro_batch["query_neuron_ids"].to(device),
                 mouse_id=mouse_id,
                 behaviors=micro_batch["behavior"].to(device),
                 pupil_centers=micro_batch["pupil_center"].to(device),
             )
             loss = criterion(
-                y_true=y_true,
+                y_true=y_true[:, micro_batch["query_neuron_ids"]],
                 y_pred=y_pred,
                 mouse_id=mouse_id,
                 batch_size=batch_size,
             )
-            reg_loss = (y_true.size(0) / batch_size) * model.regularizer(mouse_id)
+            print("y_true[micro_batch[query_neuron_ids]]", y_true[:, micro_batch["query_neuron_ids"]].shape)
+            reg_loss = (y_true[:, micro_batch["query_neuron_ids"]].size(0) / batch_size) * model.regularizer(mouse_id)
             total_loss = loss + reg_loss
         scaler.scale(total_loss).backward()
         result["loss/loss"].append(loss.detach())
@@ -139,22 +143,24 @@ def validation_step(
             y_pred, _, _ = model(
                 inputs=micro_batch["image"].to(device),
                 neuron_inputs=micro_batch["response"].to(device),
+                input_neuron_ids=micro_batch["input_neuron_ids"].to(device),
+                query_neuron_ids=micro_batch["query_neuron_ids"].to(device),
                 mouse_id=mouse_id,
                 behaviors=micro_batch["behavior"].to(device),
                 pupil_centers=micro_batch["pupil_center"].to(device),
             )
             loss = criterion(
-                y_true=y_true,
+                y_true=y_true[:, micro_batch["query_neuron_ids"]],
                 y_pred=y_pred,
                 mouse_id=mouse_id,
                 batch_size=batch_size,
             )
-            reg_loss = (y_true.size(0) / batch_size) * model.regularizer(mouse_id)
+            reg_loss = (y_true[:, micro_batch["query_neuron_ids"]].size(0) / batch_size) * model.regularizer(mouse_id)
             total_loss = loss + reg_loss
         result["loss/loss"].append(loss)
         result["loss/reg_loss"].append(reg_loss)
         result["loss/total_loss"].append(total_loss)
-        targets.append(y_true)
+        targets.append(y_true[:, micro_batch["query_neuron_ids"]])
         predictions.append(y_pred)
     return gather(result), vstack(targets), vstack(predictions)
 

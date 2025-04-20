@@ -166,6 +166,7 @@ class AttentionReadout(Readout):
         super(AttentionReadout, self).__init__(
             args, input_shape=input_shape, output_shape=output_shape, ds=ds, name=name
         )
+        self.register_buffer("reg_scale", torch.tensor(args.readout_reg_scale))
         emb_dim_r = args.emb_dim_readout 
 
         self.cross_attention = CrossAttention(
@@ -225,12 +226,12 @@ class AttentionReadout(Readout):
 
         return outputs
 
-    # def feature_l1(self, reduction: str = "sum"):
-    #     l1 = self.neuron_id_tokenizer.embedding.weight.abs()
-    #     return l1.sum() if reduction == "sum" else l1.mean()
+    def feature_l1(self, reduction: str = "sum"):
+        l1 = self.neuron_id_tokenizer.embedding.weight.abs()
+        return l1.sum() if reduction == "sum" else l1.mean()
 
     def regularizer(self, reduction: str = "sum"):
-        reg_term = self.reg_scale * self.feature_l1(reduction=reduction)
+        # reg_term = self.reg_scale * self.feature_l1(reduction=reduction)
 
         l1 = self.neuron_projection.weight.abs()
         l1 = l1.sum() if reduction == "sum" else l1.mean()
@@ -239,8 +240,8 @@ class AttentionReadout(Readout):
             bias = self.neuron_projection.bias.abs()
             l1 += bias.sum() if reduction == "sum" else bias.mean()
 
-        reg_term += self.reg_scale * l1
-        return reg_term
+        # reg_term += self.reg_scale * l1
+        return self.reg_scale * l1 #reg_term
 
 
 # class CrossAttention(nn.Module):

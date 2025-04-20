@@ -524,7 +524,7 @@ class MultiModalViTCore(Core):
         mouse_id: str,
         behaviors: torch.Tensor,
         pupil_centers: torch.Tensor,
-         neuron_id_tokenizer: t.Any = None,
+        neuron_id_tokenizer: t.Any = None,
     ):
         outputs = self.patch_embedding(inputs)
         print("outputs.shape after patch emb", outputs.shape)
