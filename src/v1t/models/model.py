@@ -19,9 +19,38 @@ from v1t.models.image_cropper import ImageCropper
 from v1t.models.utils import ELU1, load_pretrain_core
 
 
+# def get_model_info(
+#     model: nn.Module,
+#     input_data: t.Union[torch.Tensor, t.Sequence[t.Any], t.Mapping[str, t.Any], t.Any],#, torch.Tensor],#, torch.Tensor],
+#     mouse_id: str = None,
+#     filename: str = None,
+#     summary: Summary = None,
+#     device: torch.device = "cpu",
+#     tag: str = "model/trainable_parameters",
+# ):
+#     args = {
+#         "model": model,
+#         "input_data": input_data, 
+#         "depth": 5,
+#         "device": device,
+#         "verbose": 0,
+#     }
+#     if mouse_id is not None:
+#         args["mouse_id"] = mouse_id
+
+#     with warnings.catch_warnings():
+#         warnings.filterwarnings("ignore", category=UserWarning)
+#         model_info = torchinfo.summary(**args)
+
+#     if filename is not None:
+#         with open(filename, "w") as file:
+#             file.write(str(model_info))
+#     if summary is not None:
+#         summary.scalar(tag, model_info.trainable_params)
+#     return model_info
 def get_model_info(
     model: nn.Module,
-    input_data: t.Union[torch.Tensor, t.Sequence[t.Any], t.Mapping[str, t.Any], t.Any],#, torch.Tensor],#, torch.Tensor],
+    input_data: t.Union[torch.Tensor, t.Sequence[t.Any], t.Mapping[str, t.Any], t.Any],
     mouse_id: str = None,
     filename: str = None,
     summary: Summary = None,
@@ -30,7 +59,7 @@ def get_model_info(
 ):
     args = {
         "model": model,
-        "input_data": input_data, 
+        "input_data": input_data,
         "depth": 5,
         "device": device,
         "verbose": 0,
@@ -40,7 +69,43 @@ def get_model_info(
 
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore", category=UserWarning)
-        model_info = torchinfo.summary(**args)
+        # try:
+        #     # first attempt: whatever your default sdp_kernel config is
+        #     model_info = torchinfo.summary(**args)
+        # except RuntimeError as e:
+        #     # catch exactly the “No available kernel” flash-attn failure
+        #     if "No available kernel.  Aborting execution." in str(e):
+        #         # retry with flash-attn disabled so math/mem-efficient kernels are picked
+        #         with torch.backends.cuda.sdp_kernel(
+        #             enable_flash=False,
+        #             enable_math=True,
+        #             enable_mem_efficient=True
+        #         ):
+        #             model_info = torchinfo.summary(**args)
+        #     else:
+        #         # re‑raise anything else
+        #         raise
+        try:
+            model_info = torchinfo.summary(**args)
+        except RuntimeError as e:
+            if "No available kernel.  Aborting execution." in str(e):
+                # 2) Retry with flash turned off (math or mem‑efficient)
+                with torch.backends.cuda.sdp_kernel(
+                    enable_flash=False,
+                    enable_math=True,
+                    enable_mem_efficient=True
+                ):
+                    try:
+                        model_info = torchinfo.summary(**args)
+                    except RuntimeError:
+                        # 3) Fallback: force everything onto CPU
+                        orig_dev = next(model.parameters()).device
+                        model_cpu = model.to("cpu")
+                        args_cpu = {**args, "device": "cpu"}
+                        model_info = torchinfo.summary(**args_cpu)
+                        model.to(orig_dev)
+            else:
+                raise
 
     if filename is not None:
         with open(filename, "w") as file:

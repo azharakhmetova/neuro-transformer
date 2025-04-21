@@ -407,6 +407,7 @@ def compute_micro_batch_size(
     Calculate the maximum micro batch size that can fill the GPU memory if
     CUDA device is set.
     """
+    assert args.micro_batch_step_size >= args.start_micro_batch_size
     if hasattr(args, "micro_batch_size") and args.micro_batch_size:
         assert args.micro_batch_size <= args.batch_size
         return
@@ -434,7 +435,7 @@ def compute_micro_batch_size(
     image_shape = args.input_shape
     random_input = lambda size: torch.rand(*size, device=device)
 
-    batch_size, micro_batch_size = args.batch_size, 1
+    batch_size, micro_batch_size = args.batch_size, args.start_micro_batch_size
     while True:
         if micro_batch_size >= batch_size:
             micro_batch_size = batch_size
@@ -466,11 +467,24 @@ def compute_micro_batch_size(
                     total_loss.backward()
                 optimizer.step()
                 optimizer.zero_grad()
-            micro_batch_size += 7 if micro_batch_size == 1 else 8
+        #     micro_batch_size += args.micro_batch_step_size-args.start_micro_batch_size if micro_batch_size == args.start_micro_batch_size else args.micro_batch_step_size
+        #     print(micro_batch_size)
+        # except RuntimeError:
+        #     if args.verbose:
+        #         print(f"OOM at micro batch size {micro_batch_size}")
+        #     micro_batch_size -= args.micro_batch_step_size-args.start_micro_batch_size if micro_batch_size == args.micro_batch_step_size else args.micro_batch_step_size
+        #     print(f"micro batch size {micro_batch_size} is too large, trying {micro_batch_size - args.micro_batch_step_size}")
+        #     break
+            # successful: grow by the user’s step
+            micro_batch_size += args.micro_batch_step_size
+            print
+
         except RuntimeError:
             if args.verbose:
                 print(f"OOM at micro batch size {micro_batch_size}")
-            micro_batch_size -= 7 if micro_batch_size == 8 else 8
+            # if we OOM’d right at the start, don’t back off further
+            if micro_batch_size != args.start_micro_batch_size:
+                micro_batch_size -= args.micro_batch_step_size
             break
     del train_ds, model, optimizer, criterion
     torch.cuda.empty_cache()

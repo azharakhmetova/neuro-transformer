@@ -48,6 +48,7 @@ def train_step(
     scaler: GradScaler,
     update: bool,
     micro_batch_size: int,
+    readout: str,
     device: torch.device = "cpu",
 ) -> t.Dict[str, torch.Tensor]:
     model.to(device)
@@ -58,6 +59,8 @@ def train_step(
             print("micro_batch['response']:", micro_batch["response"].shape)
             print("micro_batch['input_neuron_ids']:", micro_batch["input_neuron_ids"].shape)
             y_true = micro_batch["response"].to(device)
+            if readout == "attention":
+                y_true[:, micro_batch["query_neuron_ids"]]
             y_pred, _, _ = model(
                 inputs=micro_batch["image"].to(device),
                 neuron_inputs=micro_batch["response"].to(device),
@@ -68,13 +71,13 @@ def train_step(
                 pupil_centers=micro_batch["pupil_center"].to(device),
             )
             loss = criterion(
-                y_true=y_true[:, micro_batch["query_neuron_ids"]],
+                y_true=y_true,
                 y_pred=y_pred,
                 mouse_id=mouse_id,
                 batch_size=batch_size,
             )
-            print("y_true[micro_batch[query_neuron_ids]]", y_true[:, micro_batch["query_neuron_ids"]].shape)
-            reg_loss = (y_true[:, micro_batch["query_neuron_ids"]].size(0) / batch_size) * model.regularizer(mouse_id)
+            # print("y_true[micro_batch[query_neuron_ids]]", y_true[:, micro_batch["query_neuron_ids"]].shape)
+            reg_loss = (y_true.size(0) / batch_size) * model.regularizer(mouse_id)
             total_loss = loss + reg_loss
         scaler.scale(total_loss).backward()
         result["loss/loss"].append(loss.detach())
@@ -116,6 +119,7 @@ def train(
             scaler=scaler,
             update=(i + 1) % update_frequency == 0,
             micro_batch_size=args.micro_batch_size,
+            readout=args.readout,
             device=args.device,
         )
         utils.update_dict(results[mouse_id], result)
@@ -130,6 +134,7 @@ def validation_step(
     criterion: losses.Loss,
     scaler: GradScaler,
     micro_batch_size: int,
+    readout: str,
     device: torch.device = "cpu",
 ) -> t.Tuple[t.Dict[str, torch.Tensor], torch.Tensor, torch.Tensor]:
     model.to(device)
@@ -140,6 +145,8 @@ def validation_step(
         print("micro_batch: ", micro_batch["response"].shape)
         with autocast(enabled=scaler.is_enabled(), dtype=torch.float16):
             y_true = micro_batch["response"].to(device)
+            if readout == "attention":
+                y_true[:, micro_batch["query_neuron_ids"]]
             y_pred, _, _ = model(
                 inputs=micro_batch["image"].to(device),
                 neuron_inputs=micro_batch["response"].to(device),
@@ -150,17 +157,17 @@ def validation_step(
                 pupil_centers=micro_batch["pupil_center"].to(device),
             )
             loss = criterion(
-                y_true=y_true[:, micro_batch["query_neuron_ids"]],
+                y_true=y_true,
                 y_pred=y_pred,
                 mouse_id=mouse_id,
                 batch_size=batch_size,
             )
-            reg_loss = (y_true[:, micro_batch["query_neuron_ids"]].size(0) / batch_size) * model.regularizer(mouse_id)
+            reg_loss = (y_true.size(0) / batch_size) * model.regularizer(mouse_id)
             total_loss = loss + reg_loss
         result["loss/loss"].append(loss)
         result["loss/reg_loss"].append(reg_loss)
         result["loss/total_loss"].append(total_loss)
-        targets.append(y_true[:, micro_batch["query_neuron_ids"]])
+        targets.append(y_true)
         predictions.append(y_pred)
     return gather(result), vstack(targets), vstack(predictions)
 
@@ -187,6 +194,7 @@ def validate(
                     criterion=criterion,
                     scaler=scaler,
                     micro_batch_size=args.micro_batch_size,
+                    readout=args.readout,
                     device=args.device,
                 )
                 utils.update_dict(mouse_result, result)
@@ -410,6 +418,18 @@ if __name__ == "__main__":
         help="micro batch size to train the model. if the model is being "
         "trained on CUDA device and micro batch size 0 is provided, then "
         "automatically increase micro batch size until OOM.",
+    )
+    parser.add_argument(
+        "--start_micro_batch_size",
+        type=int,
+        default=1,
+        help="starting micro batch size.",
+    )
+    parser.add_argument(
+        "--micro_batch_step_size",
+        type=int,
+        default=8,
+        help="step size to choose the micro batch size that fits into memory.",
     )
     parser.add_argument(
         "--device",
