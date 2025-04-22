@@ -1,3 +1,3 @@
-from .tokenisation import NeuronIDTokenizer
-from .tokenisation import SimpleResponsesTokenizer
-from .tokenisation import SampleNeuronIDs
+from .tokenization import NeuronIDTokenizer
+from .tokenization import SimpleResponsesTokenizer
+from .tokenization import SampleNeuronIDs

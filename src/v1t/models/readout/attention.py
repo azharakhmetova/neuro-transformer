@@ -208,6 +208,12 @@ class AttentionReadout(Readout):
         if self.project_neuron_queries:
             self.neuron_query_projection = nn.Linear(args.emb_dim_tokenizer, emb_dim_r, bias=True)
         self.neuron_projection = nn.Linear(in_features=emb_dim_r, out_features=1, bias=True)
+        # initialize to average‑pooling initial guess:
+        with torch.no_grad():
+            self.neuron_projection.weight.fill_(1.0 / emb_dim_r)
+            if use_bias:
+                self.neuron_projection.bias.zero_()
+
 
         if args.grad_checkpointing and args.verbose:
             print(f"Enable gradient checkpointing in attention readout")
