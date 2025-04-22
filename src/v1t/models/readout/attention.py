@@ -89,28 +89,36 @@ class CrossAttention(nn.Module):
         if scale:
             self.register_buffer("scale_readout", torch.tensor(self.scale))
 
-    def scaled_dot_product_attention(self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor):
-        dots = torch.matmul(q, k.transpose(-1, -2)) * self.scale
-        attn = self.attend(dots)
-        attn = self.dropout(attn)
-        outputs = einsum(attn, v, "b h n i, b h i d -> b h n d")
-        return outputs
-
     # def scaled_dot_product_attention(self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor):
-    #     """ 
-    #     q: [B, H, N, D_head]
-    #     k, v: [B, H, S, D_head]
-    #     """
-    #     # Dispatch through FlashAttention (or fall back) via PyTorch’s sdpa_kernel
-    #     with sdpa_kernel([SDPBackend.FLASH_ATTENTION]):
-    #         out = F.scaled_dot_product_attention(
-    #             q, k, v,
-    #             attn_mask=None,
-    #             dropout_p=self.dropout.p,
-    #             is_causal=False
-    #         )
-    #     # out shape is [B, H, N, D_head]
-    #     return out
+    #     dots = torch.matmul(q, k.transpose(-1, -2)) * self.scale
+    #     attn = self.attend(dots)
+    #     attn = self.dropout(attn)
+    #     outputs = einsum(attn, v, "b h n i, b h i d -> b h n d")
+    #     return outputs
+
+    def scaled_dot_product_attention(self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor):
+        """ 
+        q: [B, H, N, D_head]
+        k, v: [B, H, S, D_head]
+        """
+        if q.device.type == "cuda":
+            # Dispatch through FlashAttention (or fall back) via PyTorch’s sdpa_kernel
+            with sdpa_kernel([SDPBackend.FLASH_ATTENTION]):
+                out = F.scaled_dot_product_attention(
+                    q, k, v,
+                    attn_mask=None,
+                    dropout_p=self.dropout.p,
+                    is_causal=False
+                )
+        else:
+            out = F.scaled_dot_product_attention(
+                q, k, v,
+                attn_mask=None,
+                dropout_p=self.dropout.p,
+                is_causal=False
+            )            
+        # out shape is [B, H, N, D_head]
+        return out
 
     def mha(self, q: torch.Tensor, inputs: torch.Tensor):
         q = self.layer_norm(q)
