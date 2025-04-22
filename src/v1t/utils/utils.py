@@ -10,6 +10,7 @@ from torch import nn
 from tqdm import tqdm
 from copy import deepcopy
 from torch.utils.data import DataLoader
+from torch.cuda.amp import autocast
 
 from v1t.models import Model
 from v1t import losses, data
@@ -232,32 +233,33 @@ def plot_samples(
         for batch in mouse_ds:
             should_break = False
             for micro_batch in data.micro_batching(batch, args.micro_batch_size):
-                images = micro_batch["image"]
-                predictions, crop_images, image_grids = model(
-                    inputs=images.to(device),
-                    neuron_inputs=micro_batch["response"].to(device),
-                    input_neuron_ids=micro_batch["input_neuron_ids"].to(device),
-                    query_neuron_ids=micro_batch["query_neuron_ids"].to(device),
-                    mouse_id=mouse_id,
-                    pupil_centers=micro_batch["pupil_center"].to(device),
-                    behaviors=micro_batch["behavior"].to(device),
-                )
-                images = i_transform_image(images.cpu())
-                crop_images = i_transform_image(crop_images.cpu())
-                image_grids = image_grids.cpu()
-                predictions = predictions.cpu()
+                with autocast(dtype=torch.float16):
+                    images = micro_batch["image"]
+                    predictions, crop_images, image_grids = model(
+                        inputs=images.to(device),
+                        neuron_inputs=micro_batch["response"].to(device),
+                        input_neuron_ids=micro_batch["input_neuron_ids"].to(device),
+                        query_neuron_ids=micro_batch["query_neuron_ids"].to(device),
+                        mouse_id=mouse_id,
+                        pupil_centers=micro_batch["pupil_center"].to(device),
+                        behaviors=micro_batch["behavior"].to(device),
+                    )
+                    images = i_transform_image(images.cpu())
+                    crop_images = i_transform_image(crop_images.cpu())
+                    image_grids = image_grids.cpu()
+                    predictions = predictions.cpu()
 
-                results["images"].append(images)
-                results["crop_images"].append(crop_images)
-                results["image_grids"].append(image_grids)
-                results["targets"].append(micro_batch["response"])
-                results["predictions"].append(predictions)
-                results["pupil_center"].append(micro_batch["pupil_center"])
-                results["behaviors"].append(micro_batch["behavior"])
-                results["image_ids"].append(micro_batch["image_id"])
-                should_break = (num_samples := num_samples + len(images)) >= num_plots
-                if should_break:
-                    break
+                    results["images"].append(images)
+                    results["crop_images"].append(crop_images)
+                    results["image_grids"].append(image_grids)
+                    results["targets"].append(micro_batch["response"])
+                    results["predictions"].append(predictions)
+                    results["pupil_center"].append(micro_batch["pupil_center"])
+                    results["behaviors"].append(micro_batch["behavior"])
+                    results["image_ids"].append(micro_batch["image_id"])
+                    should_break = (num_samples := num_samples + len(images)) >= num_plots
+                    if should_break:
+                        break
             if should_break:
                 break
         results = {k: torch.vstack(v) for k, v in results.items()}

@@ -60,7 +60,8 @@ def train_step(
             print("micro_batch['input_neuron_ids']:", micro_batch["input_neuron_ids"].shape)
             y_true = micro_batch["response"].to(device)
             if readout == "attention":
-                y_true[:, micro_batch["query_neuron_ids"]]
+                y_true = y_true[:, micro_batch["query_neuron_ids"]]
+                print("sliced y_true:", y_true.shape)
             y_pred, _, _ = model(
                 inputs=micro_batch["image"].to(device),
                 neuron_inputs=micro_batch["response"].to(device),
@@ -146,7 +147,7 @@ def validation_step(
         with autocast(enabled=scaler.is_enabled(), dtype=torch.float16):
             y_true = micro_batch["response"].to(device)
             if readout == "attention":
-                y_true[:, micro_batch["query_neuron_ids"]]
+                y_true = y_true[:, micro_batch["query_neuron_ids"]]
             y_pred, _, _ = model(
                 inputs=micro_batch["image"].to(device),
                 neuron_inputs=micro_batch["response"].to(device),

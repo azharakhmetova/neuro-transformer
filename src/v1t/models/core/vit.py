@@ -253,34 +253,39 @@ class Attention(nn.Module):
             self.mask = None
             self.register_buffer("scale", torch.tensor(scale))
 
-    def scaled_dot_product_attention(
-        self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor
-    ):
-        if self.mask is None:
-            dots = torch.matmul(q, k.transpose(-1, -2)) * self.scale
+    # def scaled_dot_product_attention(
+    #     self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor
+    # ):
+    #     if self.mask is None:
+    #         dots = torch.matmul(q, k.transpose(-1, -2)) * self.scale
+    #     else:
+    #         scale = repeat(self.scale, "h -> b h 1 1", b=q.size(0))
+    #         dots = torch.matmul(q, k.transpose(-1, -2)) * scale
+    #         dots[:, :, self.mask[:, 0], self.mask[:, 1]] = -self.max_value
+    #     attn = self.attend(dots)
+    #     attn = self.dropout(attn)
+    #     outputs = einsum(attn, v, "b h n i, b h i d -> b h n d")
+    #     return outputs
+    def scaled_dot_product_attention(self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor):
+        """ 
+        q: [B, H, N, D_head]
+        k, v: [B, H, S, D_head]
+        """
+        if q.device.type == "cuda":
+            with sdpa_kernel([SDPBackend.FLASH_ATTENTION]):
+                return F.scaled_dot_product_attention(
+                    q, k, v,
+                    attn_mask=self.mask,
+                    dropout_p=self.dropout.p,
+                    is_causal=False,
+                )
         else:
-            scale = repeat(self.scale, "h -> b h 1 1", b=q.size(0))
-            dots = torch.matmul(q, k.transpose(-1, -2)) * scale
-            dots[:, :, self.mask[:, 0], self.mask[:, 1]] = -self.max_value
-        attn = self.attend(dots)
-        attn = self.dropout(attn)
-        outputs = einsum(attn, v, "b h n i, b h i d -> b h n d")
-        return outputs
-    # def scaled_dot_product_attention(self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor):
-    #     """ 
-    #     q: [B, H, N, D_head]
-    #     k, v: [B, H, S, D_head]
-    #     """
-    #     # Dispatch through FlashAttention (or fall back) via PyTorch’s sdpa_kernel
-    #     with sdpa_kernel([SDPBackend.FLASH_ATTENTION]):
-    #         out = F.scaled_dot_product_attention(
-    #             q, k, v,
-    #             attn_mask=None,
-    #             dropout_p=self.dropout.p,
-    #             is_causal=False
-    #         )
-    #     # out shape is [B, H, N, D_head]
-    #     return out
+            return F.scaled_dot_product_attention(
+            q, k, v,
+            attn_mask=self.mask,
+            dropout_p=self.dropout.p,
+            is_causal=False,
+            )
 
     def mha(self, inputs: torch.Tensor):
         inputs = self.layer_norm(inputs)
