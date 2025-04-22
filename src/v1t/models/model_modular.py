@@ -13,7 +13,7 @@ from v1t.models.core import get_core
 from v1t.models.readout import Readouts
 from v1t.models.image_processing import Image2Patches
 from v1t.models.neuron_processing import NeuronIDTokenizer
-from v1t.models.neuron_processing import SampleNeuronIDs
+from v1t.models.neuron_processing import SimpleResponsesTokenizer 
 from v1t.utils.tensorboard import Summary
 from v1t.models.core_shifter import CoreShifters
 from v1t.models.image_cropper import ImageCropper
@@ -70,22 +70,6 @@ def get_model_info(
 
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore", category=UserWarning)
-        # try:
-        #     # first attempt: whatever your default sdp_kernel config is
-        #     model_info = torchinfo.summary(**args)
-        # except RuntimeError as e:
-        #     # catch exactly the “No available kernel” flash-attn failure
-        #     if "No available kernel.  Aborting execution." in str(e):
-        #         # retry with flash-attn disabled so math/mem-efficient kernels are picked
-        #         with torch.backends.cuda.sdp_kernel(
-        #             enable_flash=False,
-        #             enable_math=True,
-        #             enable_mem_efficient=True
-        #         ):
-        #             model_info = torchinfo.summary(**args)
-        #     else:
-        #         # re‑raise anything else
-        #         raise
         try:
             model_info = torchinfo.summary(**args)
         except RuntimeError as e:
@@ -140,38 +124,49 @@ class Model(nn.Module):
         self.tokenize_neurons = args.tokenize_neurons
         self.emb_dim_tokenizer = args.emb_dim_tokenizer
         self.frac_input_neurons = args.frac_input_neurons
+        self.num_samples_per_token = args.num_samples_per_token
         self.micro_batch_size = args.micro_batch_size
         self.register_buffer("reg_scale", torch.tensor(args.core_reg_scale))
-        
+
+        print("tokenize neurons: ", self.tokenize_neurons)
+        if self.tokenize_neurons == 1:
+            self.neuron_id_tokenizer = NeuronIDTokenizer(num_neurons=list(self.output_shapes.items())[0][1][0], emb_dim=args.emb_dim_tokenizer, device=args.device)
+            # print(self.neuron_id_tokenizer)
+
+        self.add_module(
+            "image_cropper",
+            module=ImageCropper(args, ds=ds),
+        )
+                
         self.patch_embedding = Image2Patches(
-            image_shape=input_shape,
+            image_shape=self.image_cropper.output_shape,
             patch_mode=args.patch_mode,
             patch_size=args.patch_size,
             stride=args.patch_stride,
             emb_dim=args.emb_dim,
             dropout=args.p_dropout,
         )
-
-        print("tokenize neurons: ", self.tokenize_neurons)
-        if self.tokenize_neurons == 1:
-            self.neuron_id_tokenizer = NeuronIDTokenizer(num_neurons=list(self.output_shapes.items())[0][1][0], emb_dim=args.emb_dim_tokenizer, device=args.device)
-            print(self.neuron_id_tokenizer)
-            self.neuron_id_sampler = SampleNeuronIDs(num_neurons=list(self.output_shapes.items())[0][1][0], frac_input_neurons=args.frac_input_neurons, device=args.device)
-
-        self.add_module(
-            "image_cropper",
-            module=ImageCropper(args, ds=ds),
+        self.neuron_embedding = SimpleResponsesTokenizer(
+            args,
+            num_neurons=list(self.output_shapes.items())[0][1][0],
+            total_samples_per_neuron=1,
+            frac_input_neurons=args.frac_input_neurons,
+            num_samples_per_token=args.num_samples_per_token,
+            token_dim=args.emb_dim,
+            device=args.device,
+            use_masking=None,
         )
         print("core: ", self.core_type)
-        if self.core_type == "multimodalvit":
+        if self.core_type == "multimodalattention":
             print("here")
             self.add_module(
                 name="core",
                 module=get_core(args)(
                     args,
                     input_shape=self.image_cropper.output_shape,
-                    num_neurons=list(self.output_shapes.items())[0][1][0],
-                    num_samples_per_neuron=1,
+                    image_encoder_output_shape=self.patch_embedding.output_shape,
+                    image_encoder_num_patches=self.patch_embedding.num_patches,
+                    neuron_num_tokens=self.neuron_embedding.output_shape[0],
                 ),
             )
             print("here 2")
@@ -276,31 +271,19 @@ class Model(nn.Module):
             behaviors=behaviors,
             pupil_centers=pupil_centers,
         )
-        # if not dummy and self.tokenize_neurons:
-        #     input_neuron_ids, query_neuron_ids = self.neuron_id_sampler()
-        #     print("input neuron ids: ", input_neuron_ids.shape)
-        #     print("input_neuron_ids dtype:", input_neuron_ids.dtype)
-        #     print("input_neuron_ids device:", input_neuron_ids.device)
-        #     print("query neuron ids: ", query_neuron_ids.shape)
-        # elif dummy and self.tokenize_neurons:
-        #     print("dummy forward pass")
-        #     input_neuron_ids = torch.arange(int(self.frac_input_neurons * list(self.output_shapes.items())[0][1][0])).view(-1)
-        #     query_neuron_ids = torch.arange(int(self.frac_input_neurons * list(self.output_shapes.items())[0][1][0]), list(self.output_shapes.items())[0][1][0]).view(-1)
-        #     # self.neuron_id_tokenizer = lambda neuron_ids: torch.zeros(neuron_ids.size(0), self.emb_dim_tokenizer, device="cpu")
-        # else:
-        #     input_neuron_ids = None
-        #     query_neuron_ids = None
-        
-
-        if self.core_type == "multimodalvit" and neuron_inputs is not None:
+     
+        if self.core_type == "multimodalvit" or "multimodalattention" and neuron_inputs is not None:
             if neuron_inputs.dim() != 3:
                 neuron_inputs = neuron_inputs.unsqueeze(-1)
             print("neuron inputs: ", neuron_inputs.shape)
+        print("images: ", images.shape)
+        image_tokens = self.patch_embedding(images)
+        print("outputs after patch embedding: ", image_tokens.shape)
+        input_neuron_tokens = self.neuron_embedding(neuron_inputs, input_neuron_ids.to(torch.long), self.neuron_id_tokenizer)
+        print("outputs after neuron embedding: ", input_neuron_tokens.shape)
         outputs = self.core(
-            inputs=images,
-            neuron_inputs=neuron_inputs,
-            input_neuron_ids=input_neuron_ids,
-            neuron_id_tokenizer=self.neuron_id_tokenizer,
+            image_tokens=image_tokens,
+            neuron_tokens=input_neuron_tokens,
             mouse_id=mouse_id,
             behaviors=behaviors,
             pupil_centers=pupil_centers,
@@ -310,7 +293,8 @@ class Model(nn.Module):
         if self.core_shifter is not None:
             shifts = self.core_shifter(pupil_centers, mouse_id=mouse_id)
         if self.readout_type == "attention":
-            outputs = self.readouts(outputs, mouse_id=mouse_id, neuron_ids=query_neuron_ids.to(torch.long), neuron_id_tokenizer=self.neuron_id_tokenizer, shifts=shifts)
+            neuron_queries = self.neuron_id_tokenizer(neuron_ids=query_neuron_ids.to(torch.long)).unsqueeze(0)
+            outputs = self.readouts(outputs, mouse_id=mouse_id, neuron_queries=neuron_queries, shifts=shifts)
             print("outputs after attention readout: ", outputs.shape)
         else:
             outputs = self.readouts(outputs, mouse_id=mouse_id, shifts=shifts)
@@ -338,16 +322,15 @@ def get_model(args, ds: t.Dict[str, DataLoader], summary: Summary = None) -> Mod
     batch_size = args.micro_batch_size
     random_input = lambda size: torch.rand(*size)
     
-    model.core.forward = partial(model.core.forward, neuron_id_tokenizer=model.neuron_id_tokenizer)
-    for key, readout in model.readouts.items():
-        readout.forward = partial(readout.forward, neuron_id_tokenizer=model.neuron_id_tokenizer)
+    # model.core.forward = partial(model.core.forward, neuron_id_tokenizer=model.neuron_id_tokenizer)
+    # for key, readout in model.readouts.items():
+    #     readout.forward = partial(readout.forward, neuron_id_tokenizer=model.neuron_id_tokenizer)
     N = list(model.output_shapes.items())[0][1][0]
     input_data = {
         "inputs": random_input((batch_size, *model.input_shape)),
         "behaviors": random_input((batch_size, 3)),
         "pupil_centers": random_input((batch_size, 2)),
         "neuron_inputs": random_input((batch_size, N, 1)),
-        # "dummy": True,
         }
     if args.tokenize_neurons:
         K = int(args.frac_input_neurons * N)
@@ -363,6 +346,7 @@ def get_model(args, ds: t.Dict[str, DataLoader], summary: Summary = None) -> Mod
         filename=os.path.join(args.output_dir, "model.txt"),
         summary=summary,
     )
+    print("Model device after get_model_info: ", model.device)
     args.trainable_params = model_info.trainable_params
     if args.verbose > 2:
         print(str(model_info))
@@ -371,12 +355,10 @@ def get_model(args, ds: t.Dict[str, DataLoader], summary: Summary = None) -> Mod
     get_model_info(
         model=model.core,
         input_data={
-            "inputs": random_input((batch_size, *model.core.input_shape)),
+            "image_tokens": random_input((batch_size, *model.patch_embedding.output_shape)),
             "behaviors": random_input((batch_size, 3)),
             "pupil_centers": random_input((batch_size, 2)),
-            "neuron_inputs": random_input((batch_size, N, 1)),
-            "input_neuron_ids": torch.arange(K, dtype=torch.long, device="cpu").view(-1), #.repeat(batch_size),
-            # "neuron_id_tokenizer": lambda neuron_ids: torch.zeros(neuron_ids.size(0), args.emb_dim_tokenizer, device="cpu"),
+            "neuron_tokens": random_input((batch_size, model.neuron_embedding.output_shape[0], args.emb_dim)),
         },
         mouse_id=mouse_id,
         filename=os.path.join(args.output_dir, "model_core.txt"),
@@ -384,10 +366,12 @@ def get_model(args, ds: t.Dict[str, DataLoader], summary: Summary = None) -> Mod
         tag="model/trainable_parameters/core",
     )
     # get readout summary
+    q = int(list(model.output_shapes.items())[0][1][0]*(1-args.frac_input_neurons))
     get_model_info(
         model=model.readouts[mouse_id],
         input_data={
             "inputs": random_input((batch_size, *model.core.output_shape)),
+            "neuron_queries": random_input((batch_size, q, args.emb_dim_tokenizer)),
             },
         filename=os.path.join(args.output_dir, "model_readout.txt"),
         summary=summary,

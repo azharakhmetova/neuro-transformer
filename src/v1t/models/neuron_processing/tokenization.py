@@ -27,24 +27,6 @@ class NeuronIDTokenizer(nn.Module):
 
     def forward(self, neuron_ids: torch.Tensor):
         return self.embedding(neuron_ids)
-    
-class SampleNeuronIDs():
-    def __init__(
-        self, 
-        num_neurons: int, 
-        frac_input_neurons: float,
-        device,
-        ):      
-        self.device = device
-        self.num_neurons = num_neurons
-        self.frac_input_neurons = frac_input_neurons
-    
-    def __call__(self):
-        num_ids = int(self.num_neurons * self.frac_input_neurons)
-        perm = torch.randperm(self.num_neurons)
-        input_neuron_ids = perm[:num_ids].to(self.device).long()
-        query_neuron_ids = perm[num_ids:].to(self.device).long()
-        return input_neuron_ids, query_neuron_ids
 
 class SimpleResponsesTokenizer(nn.Module):
     # todo 
@@ -60,9 +42,9 @@ class SimpleResponsesTokenizer(nn.Module):
         self, 
         args,
         num_neurons: int,
-        num_samples_per_neuron: int,
+        total_samples_per_neuron: int,
         frac_input_neurons: float,
-        samples_per_token: int, 
+        num_samples_per_token: int, 
         token_dim: int, 
         device: torch.device,
         use_masking: bool = False,
@@ -71,12 +53,12 @@ class SimpleResponsesTokenizer(nn.Module):
         self.use_masking = use_masking
         self.device = device
         self.num_input_neurons = int(frac_input_neurons * num_neurons)
-        self.samples_per_token = samples_per_token
+        self.samples_per_token = num_samples_per_token
         self.token_dim = token_dim
-        self.tokenizer = nn.Linear(samples_per_token, token_dim)
-        self.T = self.num_tokens_per_neuron(num_samples_per_neuron)
-        self.num_tokens = self.num_input_neurons * self.T
-        self.output_shape = (self.num_tokens, token_dim) 
+        self.tokenizer = nn.Linear(num_samples_per_token, token_dim)
+        self.T = self.num_tokens_per_neuron(total_samples_per_neuron)
+        self.num_input_tokens = self.num_input_neurons * self.T
+        self.output_shape = (self.num_input_tokens, token_dim) 
 
         self.project_neuron_id = args.emb_dim != args.emb_dim_tokenizer
         if self.project_neuron_id:
@@ -123,3 +105,23 @@ class SimpleResponsesTokenizer(nn.Module):
         tok = tok.view(tok.shape[0], -1, tok.shape[-1])
         print("final token shape (B, N, emb)", tok.shape)
         return tok
+    
+
+
+class SampleNeuronIDs():
+    def __init__(
+        self, 
+        num_neurons: int, 
+        frac_input_neurons: float,
+        device,
+        ):      
+        self.device = device
+        self.num_neurons = num_neurons
+        self.frac_input_neurons = frac_input_neurons
+    
+    def __call__(self):
+        num_ids = int(self.num_neurons * self.frac_input_neurons)
+        perm = torch.randperm(self.num_neurons)
+        input_neuron_ids = perm[:num_ids].to(self.device).long()
+        query_neuron_ids = perm[num_ids:].to(self.device).long()
+        return input_neuron_ids, query_neuron_ids

@@ -18,7 +18,10 @@ def register(name):
 
 class Core(nn.Module):
     def __init__(
-        self, args: t.Any, input_shape: t.Tuple[int, int, int], name: str = "Core"
+        self, 
+        args: t.Any, 
+        input_shape: t.Tuple[int, int, int], 
+        name: str = "Core"
     ):
         super(Core, self).__init__()
         self.input_shape = input_shape
@@ -51,9 +54,8 @@ class Core(nn.Module):
 
     def forward(
         self,
-        inputs: torch.Tensor,
-        neuron_inputs: torch.Tensor,
-        input_neuron_ids: torch.Tensor,
+        image_tokens: torch.Tensor,
+        neuron_tokens: torch.Tensor,
         mouse_id: str,
         behaviors: torch.Tensor,
         pupil_centers: torch.Tensor,

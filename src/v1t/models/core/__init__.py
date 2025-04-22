@@ -6,3 +6,6 @@ from .mixer import MixerCore
 from .random import RandomCore
 from .stn import SpatialTransformerCore
 from .vit import ViTCore
+from .vit import MultiModalViTCore
+from .attention import AttentionCore
+from .attention import MultiModalAttentionCore

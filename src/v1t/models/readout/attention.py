@@ -229,8 +229,7 @@ class AttentionReadout(Readout):
     def forward(
             self, 
             inputs: torch.Tensor, 
-            neuron_ids: torch.Tensor = None, 
-            neuron_id_tokenizer: t.Any = None, 
+            neuron_queries: torch.Tensor = None,
             shifts: torch.Tensor = None
     ): 
         b, c, w, h = inputs.size()
@@ -239,13 +238,12 @@ class AttentionReadout(Readout):
         if (c_in, w_in, h_in) != (c, w, h):
             warnings.warn("Mismatch between expected and actual input shape.")
 
-        if neuron_ids is None:
-            neuron_ids = torch.arange(self.num_neurons, device=inputs.device).unsqueeze(0).expand(b, -1)
-        else:
-            neuron_ids = neuron_ids.clone().detach().to(inputs.device).unsqueeze(0).expand(b, -1)
+        # if neuron_ids is None:
+        #     neuron_ids = torch.arange(self.num_neurons, device=inputs.device).unsqueeze(0).expand(b, -1)
+        # else:
+        #     neuron_ids = neuron_ids.clone().detach().to(inputs.device).unsqueeze(0).expand(b, -1)
 #neuron_ids = torch.tensor(neuron_ids, device=inputs.device).unsqueeze(0).expand(b, -1)
-
-        neuron_queries = neuron_id_tokenizer(neuron_ids)
+        print("neuron_queries  ", neuron_queries.size())
         if self.project_neuron_queries:
             neuron_queries = self.neuron_query_projection(neuron_queries)
         neuron_queries = self.dropout(neuron_queries)

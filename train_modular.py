@@ -12,8 +12,8 @@ from torch.cuda.amp import autocast, GradScaler
 
 from v1t import losses, data
 from v1t.utils.logger import Logger
-from v1t.models import get_model, Model
-from v1t.utils import utils, tensorboard
+from v1t.models.model_modular import get_model, Model
+from v1t.utils import utils_modular, tensorboard
 from v1t.utils.scheduler import Scheduler
 
 
@@ -60,7 +60,8 @@ def train_step(
             print("micro_batch['input_neuron_ids']:", micro_batch["input_neuron_ids"].shape)
             y_true = micro_batch["response"].to(device)
             if readout == "attention":
-                y_true[:, micro_batch["query_neuron_ids"]]
+                y_true = y_true[:, micro_batch["query_neuron_ids"]]
+                print("sliced y_true:", y_true.shape)
             y_pred, _, _ = model(
                 inputs=micro_batch["image"].to(device),
                 neuron_inputs=micro_batch["response"].to(device),
@@ -122,8 +123,8 @@ def train(
             readout=args.readout,
             device=args.device,
         )
-        utils.update_dict(results[mouse_id], result)
-    return utils.log_metrics(results, epoch=epoch, summary=summary, mode=0)
+        utils_modular.update_dict(results[mouse_id], result)
+    return utils_modular.log_metrics(results, epoch=epoch, summary=summary, mode=0)
 
 
 @torch.no_grad()
@@ -146,7 +147,7 @@ def validation_step(
         with autocast(enabled=scaler.is_enabled(), dtype=torch.float16):
             y_true = micro_batch["response"].to(device)
             if readout == "attention":
-                y_true[:, micro_batch["query_neuron_ids"]]
+                y_true = y_true[:, micro_batch["query_neuron_ids"]]
             y_pred, _, _ = model(
                 inputs=micro_batch["image"].to(device),
                 neuron_inputs=micro_batch["response"].to(device),
@@ -183,7 +184,7 @@ def validate(
 ) -> t.Dict[t.Union[str, int], t.Union[torch.Tensor, t.Dict[str, torch.Tensor]]]:
     model.train(False)
     results = {}
-    with tqdm(desc="Val", total=utils.num_steps(ds), disable=args.verbose < 2) as pbar:
+    with tqdm(desc="Val", total=utils_modular.num_steps(ds), disable=args.verbose < 2) as pbar:
         for mouse_id, mouse_ds in ds.items():
             mouse_result, y_true, y_pred = {}, [], []
             for batch in mouse_ds:
@@ -197,7 +198,7 @@ def validate(
                     readout=args.readout,
                     device=args.device,
                 )
-                utils.update_dict(mouse_result, result)
+                utils_modular.update_dict(mouse_result, result)
                 y_true.append(targets)
                 y_pred.append(predictions)
                 pbar.update(1)
@@ -205,7 +206,7 @@ def validate(
             mouse_result.update(compute_metrics(y_true=y_true, y_pred=y_pred))
             results[mouse_id] = mouse_result
             del y_true, y_pred
-    return utils.log_metrics(results, epoch=epoch, summary=summary, mode=1)
+    return utils_modular.log_metrics(results, epoch=epoch, summary=summary, mode=1)
 
 
 def main(args, wandb_sweep: bool = False):
@@ -215,11 +216,11 @@ def main(args, wandb_sweep: bool = False):
         os.makedirs(args.output_dir)
 
     Logger(args)
-    utils.get_device(args)
-    utils.set_random_seed(args.seed, deterministic=args.deterministic)
+    utils_modular.get_device(args)
+    utils_modular.set_random_seed(args.seed, deterministic=args.deterministic)
 
     data.get_mouse_ids(args)
-    utils.compute_micro_batch_size(args)
+    utils_modular.compute_micro_batch_size(args)
 
     train_ds, val_ds, test_ds = data.get_training_ds(
         args,
@@ -248,15 +249,15 @@ def main(args, wandb_sweep: bool = False):
     )
 
     if args.use_wandb:
-        utils.wandb_init(args, wandb_sweep=wandb_sweep)
+        utils_modular.wandb_init(args, wandb_sweep=wandb_sweep)
 
-    utils.save_args(args)
+    utils_modular.save_args(args)
     epoch = scheduler.restore(load_optimizer=True, load_scheduler=True)
 
     if args.backend is not None:
-        model = utils.compile(args, model=model)
+        model = utils_modular.compile(args, model=model)
 
-    utils.plot_samples(args, model=model, ds=train_ds, summary=summary, epoch=epoch)
+    utils_modular.plot_samples(args, model=model, ds=train_ds, summary=summary, epoch=epoch)
 
     while (epoch := epoch + 1) < args.epochs + 1:
         if args.verbose:
@@ -292,7 +293,7 @@ def main(args, wandb_sweep: bool = False):
                 step=epoch,
             )
         if epoch % 10 == 0:
-            utils.plot_samples(
+            utils_modular.plot_samples(
                 args, model=model, ds=val_ds, summary=summary, epoch=epoch
             )
         if args.verbose:
@@ -322,7 +323,7 @@ def main(args, wandb_sweep: bool = False):
             break
 
     scheduler.restore()
-    eval_result = utils.evaluate(
+    eval_result = utils_modular.evaluate(
         args,
         ds=test_ds,
         model=model,
@@ -334,7 +335,7 @@ def main(args, wandb_sweep: bool = False):
     )
     if args.use_wandb:
         wandb.log({"test_corr": eval_result["single_trial_correlation"]}, step=epoch)
-    utils.plot_samples(
+    utils_modular_modular.plot_samples(
         args, model=model, ds=test_ds, summary=summary, epoch=epoch, mode=2
     )
     if args.verbose:
@@ -513,6 +514,7 @@ if __name__ == "__main__":
     # wandb settings
     parser.add_argument("--use_wandb", action="store_true")
     parser.add_argument("--wandb_group", type=str, default="")
+    parser.add_argument("--wandb_project", type=str, default="sensorium")
 
     # misc
     parser.add_argument(
@@ -554,6 +556,7 @@ if __name__ == "__main__":
     if temp_args.tokenize_neurons == 1:
         parser.add_argument("--emb_dim_tokenizer", type=int, default=150)
         parser.add_argument("--frac_input_neurons", type=float, default=0.5)
+        parser.add_argument("--num_samples_per_token", type=int, default=1)
 
     # hyper-parameters for core module
     match temp_args.core:
@@ -624,6 +627,56 @@ if __name__ == "__main__":
             parser.add_argument("--lr", type=float, default=0.001647)
             parser.add_argument("--core_lr", type=float, default=None)
         case "multimodalvit":
+            parser.add_argument("--patch_size", type=int, default=8)
+            parser.add_argument(
+                "--patch_mode",
+                type=int,
+                default=0,
+                choices=[0, 1, 2, 3],
+                help="patch embedding mode:"
+                "0 - nn.Unfold to extract patches"
+                "1 - nn.Conv2D to extract patches"
+                "2 - Shifted Patch Tokenization https://arxiv.org/abs/2112.13492v1"
+                "3 - nn.Unfold with Dual PatchNorm https://openreview.net/forum?id=jgMqve6Qhw",
+            )
+            parser.add_argument(
+                "--patch_stride",
+                type=int,
+                default=1,
+                help="stride size to extract patches",
+            )
+            parser.add_argument("--samples_per_token", type=int, default=1)
+            parser.add_argument("--num_blocks", type=int, default=4)
+            parser.add_argument("--num_heads", type=int, default=4)
+            parser.add_argument("--emb_dim", type=int, default=155)
+            parser.add_argument("--mlp_dim", type=int, default=488)
+            parser.add_argument(
+                "--p_dropout",
+                type=float,
+                default=0.0229,
+                help="patch embeddings dropout",
+            )
+            parser.add_argument(
+                "--t_dropout", type=float, default=0.2544, help="ViT block dropout"
+            )
+            parser.add_argument(
+                "--drop_path",
+                type=float,
+                default=0.0,
+                help="stochastic depth dropout rate",
+            )
+            parser.add_argument(
+                "--use_lsa", action="store_true", help="Use Locality Self Attention"
+            )
+            parser.add_argument(
+                "--disable_bias",
+                action="store_true",
+                help="Disable bias terms in linear layers in ViT.",
+            )
+            parser.add_argument("--core_reg_scale", type=float, default=0.5379)
+            parser.add_argument("--lr", type=float, default=0.001647)
+            parser.add_argument("--core_lr", type=float, default=None)
+        case "multimodalattention":
             parser.add_argument("--patch_size", type=int, default=8)
             parser.add_argument(
                 "--patch_mode",

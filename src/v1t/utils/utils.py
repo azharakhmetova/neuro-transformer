@@ -334,7 +334,7 @@ def wandb_init(args, wandb_sweep: bool):
             config.pop("clear_output_dir", None)
             wandb.init(
                 config=config,
-                project="sensorium",
+                project=args.wandb_project,
                 entity="azharakhmetova-master-thesis",
                 group=args.wandb_group,
                 name=os.path.basename(args.output_dir),
