@@ -272,41 +272,20 @@ class Attention(nn.Module):
         k, v: [B, H, S, D_head]
         """
         if q.device.type == "cuda":
-            # Dispatch through FlashAttention (or fall back) via PyTorch’s sdpa_kernel
             with sdpa_kernel([SDPBackend.FLASH_ATTENTION]):
-                if self.mask is None:
-                    # no mask
-                    out = F.scaled_dot_product_attention(
-                        q, k, v,
-                        attn_mask=None,
-                        dropout_p=self.dropout.p,
-                        is_causal=False
-                    )
-                else:
-                    out = F.scaled_dot_product_attention(
-                        q, k, v,
-                        attn_mask=self.mask,
-                        dropout_p=self.dropout.p,
-                        is_causal=False
-                    )     
-        else:
-            if self.mask is None:
-                # no mask
-                out = F.scaled_dot_product_attention(
-                    q, k, v,
-                    attn_mask=None,
-                    dropout_p=self.dropout.p,
-                    is_causal=False
-                )
-            else:
-                out = F.scaled_dot_product_attention(
+                return F.scaled_dot_product_attention(
                     q, k, v,
                     attn_mask=self.mask,
                     dropout_p=self.dropout.p,
-                    is_causal=False
-                )                           
-        # out shape is [B, H, N, D_head]
-        return out
+                    is_causal=False,
+                )
+        else:
+            return F.scaled_dot_product_attention(
+            q, k, v,
+            attn_mask=self.mask,
+            dropout_p=self.dropout.p,
+            is_causal=False,
+            )
 
     def mha(self, inputs: torch.Tensor):
         inputs = self.layer_norm(inputs)
