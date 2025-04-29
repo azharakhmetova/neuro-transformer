@@ -243,7 +243,7 @@ class AttentionReadout(Readout):
         # else:
         #     neuron_ids = neuron_ids.clone().detach().to(inputs.device).unsqueeze(0).expand(b, -1)
 #neuron_ids = torch.tensor(neuron_ids, device=inputs.device).unsqueeze(0).expand(b, -1)
-        print("neuron_queries  ", neuron_queries.size())
+        # print("neuron_queries  ", neuron_queries.size())
         if self.project_neuron_queries:
             neuron_queries = self.neuron_query_projection(neuron_queries)
         neuron_queries = self.dropout(neuron_queries)

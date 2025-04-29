@@ -84,19 +84,20 @@ def inference(
     model.train(False)
     for batch in ds:
         for micro_batch in data.micro_batching(batch, batch_size=micro_batch_size):
-            predictions, _, _ = model(
-                inputs=micro_batch["image"].to(device),
-                neuron_inputs=micro_batch["response"].to(device),
-                input_neuron_ids=micro_batch["input_neuron_ids"].to(device),
-                query_neuron_ids=micro_batch["query_neuron_ids"].to(device),
-                mouse_id=mouse_id,
-                behaviors=micro_batch["behavior"].to(device),
-                pupil_centers=micro_batch["pupil_center"].to(device),
-            )
-            results["predictions"].append(predictions.cpu())
-            results["targets"].append(micro_batch["response"])
-            results["image_ids"].append(micro_batch["image_id"])
-            results["trial_ids"].append(micro_batch["trial_id"])
+            with autocast(dtype=torch.float16):
+                predictions, _, _ = model(
+                    inputs=micro_batch["image"].to(device),
+                    neuron_inputs=micro_batch["response"].to(device),
+                    input_neuron_ids=micro_batch["input_neuron_ids"].to(device),
+                    query_neuron_ids=micro_batch["query_neuron_ids"].to(device),
+                    mouse_id=mouse_id,
+                    behaviors=micro_batch["behavior"].to(device),
+                    pupil_centers=micro_batch["pupil_center"].to(device),
+                )
+                results["predictions"].append(predictions.cpu())
+                results["targets"].append(micro_batch["response"])
+                results["image_ids"].append(micro_batch["image_id"])
+                results["trial_ids"].append(micro_batch["trial_id"])
     results = {
         k: torch.cat(v, dim=0) if isinstance(v[0], torch.Tensor) else v
         for k, v in results.items()

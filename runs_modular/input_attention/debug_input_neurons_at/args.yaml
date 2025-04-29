@@ -14,7 +14,7 @@ criterion: poisson
 cropper_reg_scale: 0.0
 dataset: data/sensorium
 deterministic: false
-device: cuda
+device: cpu
 disable_bias: false
 dpi: 120
 drop_path: 0.0
@@ -26,20 +26,21 @@ emb_dim_tokenizer: 150
 epochs: 400
 format: svg
 frac_input_neurons: 0.25
-git_hash: b5551b6
-grad_checkpointing: true
+git_hash: 7b86e52
+grad_checkpointing: false
 gray_scale: false
 hostname: phobos
 input_shape: [1, 144, 256]
 key_embedding: 1
 limit_data: null
 lr: 0.001647
-micro_batch_size: 1
+micro_batch_size: 16
 micro_batch_step_size: 8
 mlp_dim: 488
 mouse_ids: [1_s3_45]
 num_blocks: 4
 num_heads: 4
+num_modes: 2
 num_samples_per_token: 1
 num_workers: 2
 output_dir: runs_modular/input_attention/debug_input_neurons_at
@@ -62,9 +63,10 @@ shifter_reg_scale: 0.0
 start_micro_batch_size: 1
 t_dropout: 0.2544
 tokenize_neurons: 1
-trainable_params: 4463551
+trainable_params: 4463861
 use_lsa: false
 use_wandb: false
 value_embedding: 1
 verbose: 1
 wandb_group: ''
+wandb_project: sensorium

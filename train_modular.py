@@ -56,12 +56,12 @@ def train_step(
     result = {"loss/loss": [], "loss/reg_loss": [], "loss/total_loss": []}
     for micro_batch in data.micro_batching(batch, micro_batch_size):
         with autocast(enabled=scaler.is_enabled(), dtype=torch.float16):
-            print("micro_batch['response']:", micro_batch["response"].shape)
-            print("micro_batch['input_neuron_ids']:", micro_batch["input_neuron_ids"].shape)
-            y_true = micro_batch["response"].to(device)
+            # print("micro_batch['response']:", micro_batch["response"].shape)
+            # print("micro_batch['input_neuron_ids']:", micro_batch["input_neuron_ids"].shape)
+            y_true = micro_batch["response"].to(device) # (B, N)
             if readout == "attention":
                 y_true = y_true[:, micro_batch["query_neuron_ids"]]
-                print("sliced y_true:", y_true.shape)
+                # print("sliced y_true:", y_true.shape)
             y_pred, _, _ = model(
                 inputs=micro_batch["image"].to(device),
                 neuron_inputs=micro_batch["response"].to(device),
@@ -143,7 +143,7 @@ def validation_step(
     result = {"loss/loss": [], "loss/reg_loss": [], "loss/total_loss": []}
     targets, predictions = [], []
     for micro_batch in data.micro_batching(batch, micro_batch_size):
-        print("micro_batch: ", micro_batch["response"].shape)
+        # print("micro_batch: ", micro_batch["response"].shape)
         with autocast(enabled=scaler.is_enabled(), dtype=torch.float16):
             y_true = micro_batch["response"].to(device)
             if readout == "attention":
@@ -335,7 +335,7 @@ def main(args, wandb_sweep: bool = False):
     )
     if args.use_wandb:
         wandb.log({"test_corr": eval_result["single_trial_correlation"]}, step=epoch)
-    utils_modular_modular.plot_samples(
+    utils_modular.plot_samples(
         args, model=model, ds=test_ds, summary=summary, epoch=epoch, mode=2
     )
     if args.verbose:
@@ -557,6 +557,7 @@ if __name__ == "__main__":
         parser.add_argument("--emb_dim_tokenizer", type=int, default=150)
         parser.add_argument("--frac_input_neurons", type=float, default=0.5)
         parser.add_argument("--num_samples_per_token", type=int, default=1)
+        parser.add_argument("--num_modes", type=int, default=2)
 
     # hyper-parameters for core module
     match temp_args.core:
@@ -698,7 +699,7 @@ if __name__ == "__main__":
             parser.add_argument("--samples_per_token", type=int, default=1)
             parser.add_argument("--num_blocks", type=int, default=4)
             parser.add_argument("--num_heads", type=int, default=4)
-            parser.add_argument("--emb_dim", type=int, default=155)
+            parser.add_argument("--emb_dim", type=int, default=156)
             parser.add_argument("--mlp_dim", type=int, default=488)
             parser.add_argument(
                 "--p_dropout",

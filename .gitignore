@@ -143,6 +143,7 @@ dmypy.json
 *.h5
 *.json
 /runs
+/runs_modular
 wandb/
 *.sh
 !setup.sh

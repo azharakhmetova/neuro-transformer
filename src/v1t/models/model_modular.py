@@ -11,6 +11,8 @@ from functools import partial
 
 from v1t.models.core import get_core
 from v1t.models.readout import Readouts
+from v1t.models.layers import ModeTokenizer
+from v1t.models.layers import PositionalEncoding
 from v1t.models.image_processing import Image2Patches
 from v1t.models.neuron_processing import NeuronIDTokenizer
 from v1t.models.neuron_processing import SimpleResponsesTokenizer 
@@ -128,10 +130,12 @@ class Model(nn.Module):
         self.micro_batch_size = args.micro_batch_size
         self.register_buffer("reg_scale", torch.tensor(args.core_reg_scale))
 
-        print("tokenize neurons: ", self.tokenize_neurons)
+        # print("tokenize neurons: ", self.tokenize_neurons)
         if self.tokenize_neurons == 1:
+            self.core_neuron_id_tokenizer = NeuronIDTokenizer(num_neurons=list(self.output_shapes.items())[0][1][0], emb_dim=args.emb_dim_tokenizer, device=args.device)
+            self.readout_neuron_id_tokenizer = NeuronIDTokenizer(num_neurons=list(self.output_shapes.items())[0][1][0], emb_dim=args.emb_dim_tokenizer, device=args.device)
             self.neuron_id_tokenizer = NeuronIDTokenizer(num_neurons=list(self.output_shapes.items())[0][1][0], emb_dim=args.emb_dim_tokenizer, device=args.device)
-            # print(self.neuron_id_tokenizer)
+            self.mode_tokenizer = ModeTokenizer(num_modes=args.num_modes, emb_dim=args.emb_dim)
 
         self.add_module(
             "image_cropper",
@@ -145,6 +149,7 @@ class Model(nn.Module):
             stride=args.patch_stride,
             emb_dim=args.emb_dim,
             dropout=args.p_dropout,
+            pe_mode="2d"
         )
         self.neuron_embedding = SimpleResponsesTokenizer(
             args,
@@ -156,9 +161,13 @@ class Model(nn.Module):
             device=args.device,
             use_masking=None,
         )
-        print("core: ", self.core_type)
+        self.neuron_pe = PositionalEncoding(
+            d_model=args.emb_dim,
+            max_len=list(self.output_shapes.items())[0][1][0],
+            mode="1d",
+            )
+        # print("core: ", self.core_type)
         if self.core_type == "multimodalattention":
-            print("here")
             self.add_module(
                 name="core",
                 module=get_core(args)(
@@ -169,7 +178,6 @@ class Model(nn.Module):
                     neuron_num_tokens=self.neuron_embedding.output_shape[0],
                 ),
             )
-            print("here 2")
         else:
             self.add_module(
                 name="core",
@@ -275,12 +283,27 @@ class Model(nn.Module):
         if self.core_type == "multimodalvit" or "multimodalattention" and neuron_inputs is not None:
             if neuron_inputs.dim() != 3:
                 neuron_inputs = neuron_inputs.unsqueeze(-1)
-            print("neuron inputs: ", neuron_inputs.shape)
-        print("images: ", images.shape)
-        image_tokens = self.patch_embedding(images)
-        print("outputs after patch embedding: ", image_tokens.shape)
-        input_neuron_tokens = self.neuron_embedding(neuron_inputs, input_neuron_ids.to(torch.long), self.neuron_id_tokenizer)
-        print("outputs after neuron embedding: ", input_neuron_tokens.shape)
+            neuron_pos_embedding = self.neuron_pe(neuron_inputs)
+                # print("neuron_pos_embedding shape: ", neuron_pos_embedding.shape)
+            # print("neuron inputs: ", neuron_inputs.shape)
+        # print("images: ", images.shape)
+        image_tokens = self.patch_embedding(images) 
+        # print("outputs after patch embedding: ", image_tokens.shape)
+               
+         
+        if self.frac_input_neurons > 0:
+            image_mode = torch.zeros_like(image_tokens[..., 0], dtype=torch.long, device=image_tokens.device)
+            # print("image mode shape ", image_mode.shape)
+            image_tokens += self.mode_tokenizer(mode=image_mode)
+            # input_neuron_tokens = self.neuron_embedding(neuron_inputs, input_neuron_ids.to(torch.long), self.neuron_id_tokenizer)
+            input_neuron_tokens = self.neuron_embedding(neuron_inputs, input_neuron_ids.to(torch.long), self.neuron_id_tokenizer(input_neuron_ids.to(torch.long)))
+            # print("outputs after neuron embedding: ", input_neuron_tokens.shape)
+            neuron_mode = torch.ones_like(input_neuron_tokens[..., 0], dtype=torch.long, device=input_neuron_tokens.device)
+            # print("neuron mode shape ", neuron_mode.shape)
+            input_neuron_tokens += self.mode_tokenizer(mode=neuron_mode)
+            input_neuron_tokens += neuron_pos_embedding[:, input_neuron_ids.to(torch.long), :]
+        else:
+            input_neuron_tokens = None
         outputs = self.core(
             image_tokens=image_tokens,
             neuron_tokens=input_neuron_tokens,
@@ -288,17 +311,18 @@ class Model(nn.Module):
             behaviors=behaviors,
             pupil_centers=pupil_centers,
         )    
-        print("outputs after core: ", outputs.shape)
+        # print("outputs after core: ", outputs.shape)
         shifts = None
         if self.core_shifter is not None:
             shifts = self.core_shifter(pupil_centers, mouse_id=mouse_id)
         if self.readout_type == "attention":
-            neuron_queries = self.neuron_id_tokenizer(neuron_ids=query_neuron_ids.to(torch.long)).unsqueeze(0)
+            neuron_queries = self.neuron_id_tokenizer(neuron_ids=query_neuron_ids.to(torch.long)).unsqueeze(0) + neuron_pos_embedding[:, query_neuron_ids.to(torch.long), :]
+            # neuron_queries = self.readout_neuron_id_tokenizer(neuron_ids=query_neuron_ids.to(torch.long)).unsqueeze(0)
             outputs = self.readouts(outputs, mouse_id=mouse_id, neuron_queries=neuron_queries, shifts=shifts)
-            print("outputs after attention readout: ", outputs.shape)
+            # print("outputs after attention readout: ", outputs.shape)
         else:
             outputs = self.readouts(outputs, mouse_id=mouse_id, shifts=shifts)
-            print("outputs after gaussian readout: ", outputs.shape)
+            # print("outputs after gaussian readout: ", outputs.shape)
         if activate:
             outputs = self.elu1(outputs)
         return outputs, images, image_grids

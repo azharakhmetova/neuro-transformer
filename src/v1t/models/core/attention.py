@@ -12,124 +12,9 @@ from torch.nn import functional as F
 from torch.nn.attention import SDPBackend, sdpa_kernel
 
 from v1t.models.utils import DropPath
+from v1t.models.layers import PositionalEncoding
 from v1t.models.neuron_processing import SimpleResponsesTokenizer
 
-
-class PatchShifting(nn.Module):
-    """Patch shifting for Shifted Patch Tokenization"""
-
-    def __init__(self, patch_size: int):
-        super(PatchShifting, self).__init__()
-        self.shift = int(patch_size * (1 / 2))
-
-    def forward(self, inputs: torch.Tensor):
-        """4 diagonal directions padding"""
-        padded_inputs = F.pad(
-            input=inputs,
-            pad=(self.shift, self.shift, self.shift, self.shift),
-            mode="constant",
-            value=0,
-        )
-        left_upper = padded_inputs[..., : -self.shift * 2, : -self.shift * 2]
-        right_upper = padded_inputs[..., : -self.shift * 2, self.shift * 2 :]
-        left_bottom = padded_inputs[..., self.shift * 2 :, : -self.shift * 2]
-        right_bottom = padded_inputs[..., self.shift * 2 :, self.shift * 2 :]
-        outputs = torch.cat(
-            [inputs, left_upper, right_upper, left_bottom, right_bottom],
-            dim=1,
-        )
-        return outputs
-
-
-class Image2Patches(nn.Module):
-    """
-    patch embedding mode:
-        0 - nn.Unfold to extract patches
-        1 - nn.Conv2D to extract patches
-        2 - Shifted Patch Tokenization https://arxiv.org/abs/2112.13492v1
-        3 - nn.Unfold with Dual PatchNorm https://openreview.net/forum?id=jgMqve6Qhw
-    """
-
-    def __init__(
-        self,
-        image_shape: t.Tuple[int, int, int],
-        patch_mode: int,
-        patch_size: int,
-        stride: int,
-        emb_dim: int,
-        dropout: float = 0.0,
-    ):
-        super(Image2Patches, self).__init__()
-        assert 1 <= stride <= patch_size
-        c, h, w = image_shape
-        self.input_shape = image_shape
-
-        num_patches = self.unfold_dim(h, w, patch_size=patch_size, stride=stride)
-        match patch_mode:
-            case 0:
-                patch_dim = patch_size * patch_size * c
-                self.projection = nn.Sequential(
-                    nn.Unfold(kernel_size=patch_size, stride=stride),
-                    Rearrange("b c l -> b l c"),
-                    nn.Linear(in_features=patch_dim, out_features=emb_dim),
-                )
-            case 1:
-                self.projection = nn.Sequential(
-                    nn.Conv2d(
-                        in_channels=c,
-                        out_channels=emb_dim,
-                        kernel_size=patch_size,
-                        stride=stride,
-                    ),
-                    Rearrange("b c h w -> b (h w) c"),
-                )
-            case 2:
-                patch_dim = patch_size * patch_size * (c + 4)
-                self.projection = nn.Sequential(
-                    PatchShifting(patch_size=patch_size),
-                    nn.Unfold(kernel_size=patch_size, stride=stride),
-                    Rearrange("b c l -> b l c"),
-                    nn.LayerNorm(normalized_shape=patch_dim),
-                    nn.Linear(in_features=patch_dim, out_features=emb_dim),
-                )
-            case 3:
-                patch_dim = patch_size * patch_size * c
-                self.projection = nn.Sequential(
-                    nn.Unfold(kernel_size=patch_size, stride=stride),
-                    Rearrange("b c l -> b l c"),
-                    nn.LayerNorm(normalized_shape=patch_dim),
-                    nn.Linear(in_features=patch_dim, out_features=emb_dim),
-                    nn.LayerNorm(normalized_shape=emb_dim),
-                )
-            case _:
-                raise NotImplementedError(f"--patch_mode {patch_mode} not implemented.")
-        self.cls_token = nn.Parameter(torch.randn(1, 1, emb_dim))
-        num_patches += 1
-        self.pos_embedding = nn.Parameter(torch.randn(num_patches, emb_dim))
-        self.dropout = nn.Dropout(p=dropout)
-        self.num_patches = num_patches
-        self.output_shape = (num_patches, emb_dim)
-
-        self.apply(self.init_weight)
-
-    @staticmethod
-    def unfold_dim(h: int, w: int, patch_size: int, padding: int = 0, stride: int = 1):
-        l = lambda s: math.floor(((s + 2 * padding - patch_size) / stride) + 1)
-        return l(h) * l(w)
-
-    @staticmethod
-    def init_weight(m: nn.Module):
-        if isinstance(m, nn.Conv2d):
-            nn.init.kaiming_normal_(m.weight)
-
-    def forward(self, inputs: torch.Tensor):
-        batch_size = inputs.size(0)
-        patches = self.projection(inputs)
-        cls_tokens = repeat(self.cls_token, "1 1 d -> b 1 d", b=batch_size)
-        outputs = torch.cat((cls_tokens, patches), dim=1)
-        outputs += self.pos_embedding
-        outputs = self.dropout(outputs)
-        return outputs
 
 
 class MLP(nn.Module):
@@ -520,13 +405,14 @@ class MultiModalAttentionCore(Core):
         pupil_centers: torch.Tensor,
     ):
         outputs = image_tokens
-        print("outputs.shape after patch emb", outputs.shape)
-        outputs = torch.cat((outputs, neuron_tokens), dim=1)
-        print("outputs.shape after neuron emb", outputs.shape)
+        # print("outputs.shape after patch emb", outputs.shape)
+        if neuron_tokens is not None:
+            outputs = torch.cat((outputs, neuron_tokens), dim=1)
+        # print("outputs.shape after neuron emb", outputs.shape)
         if self.behavior_mode in (3, 4):
             behaviors = torch.cat((behaviors, pupil_centers), dim=-1)
         outputs = self.transformer(outputs, mouse_id=mouse_id, behaviors=behaviors)
-        print("outputs.shape after transformer", outputs.shape)
+        # print("outputs.shape after transformer", outputs.shape)
         outputs = outputs[:, 1:, :]  # remove CLS token
         # add flag to rearrange only if it is a gaussian readout
         outputs = self.rearrange(outputs)

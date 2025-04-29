@@ -1,87 +1,91 @@
 =========================================================================================================
 Layer (type:depth-idx)                                  Output Shape              Param #
 =========================================================================================================
-Model                                                   [1, 6552]                 --
-├─ImageCropper: 1-1                                     [1, 1, 36, 64]            --
-│    └─Resize: 2-1                                      [1, 1, 36, 64]            --
-├─Image2Patches: 1-2                                    [1, 1654, 155]            256,525
-│    └─Sequential: 2-2                                  [1, 1653, 155]            --
-│    │    └─Unfold: 3-1                                 [1, 64, 1653]             --
-│    │    └─Rearrange: 3-2                              [1, 1653, 64]             --
-│    │    └─Linear: 3-3                                 [1, 1653, 155]            10,075
-│    └─Dropout: 2-3                                     [1, 1654, 155]            --
-├─SimpleResponsesTokenizer: 1-3                         [1, 2184, 155]            23,405
-│    └─Linear: 2-4                                      [1, 2184, 1, 155]         310
-├─NeuronIDTokenizer: 1-4                                [2184, 150]               --
-│    └─Embedding: 2-5                                   [2184, 150]               1,310,400
-├─SimpleResponsesTokenizer: 1-5                         --                        (recursive)
-│    └─Linear: 2-6                                      [2184, 155]               23,405
-├─MultiModalAttentionCore: 1-6                          [1, 155, 3, 1279]         --
-│    └─Transformer: 2-7                                 [1, 3838, 155]            --
+Model                                                   [16, 6552]                --
+├─ImageCropper: 1-1                                     [16, 1, 36, 64]           --
+│    └─Resize: 2-1                                      [16, 1, 36, 64]           --
+├─Image2Patches: 1-2                                    [16, 1654, 155]           256,525
+│    └─Sequential: 2-2                                  [16, 1653, 155]           --
+│    │    └─Unfold: 3-1                                 [16, 64, 1653]            --
+│    │    └─Rearrange: 3-2                              [16, 1653, 64]            --
+│    │    └─Linear: 3-3                                 [16, 1653, 155]           10,075
+│    └─Dropout: 2-3                                     [16, 1654, 155]           --
+├─ModeTokenizer: 1-3                                    [16, 1654, 155]           --
+│    └─Embedding: 2-4                                   [16, 1654, 155]           310
+├─SimpleResponsesTokenizer: 1-4                         [16, 2184, 155]           23,405
+│    └─Linear: 2-5                                      [16, 2184, 1, 155]        310
+├─NeuronIDTokenizer: 1-5                                [2184, 150]               --
+│    └─Embedding: 2-6                                   [2184, 150]               1,310,400
+├─SimpleResponsesTokenizer: 1-6                         --                        (recursive)
+│    └─Linear: 2-7                                      [2184, 155]               23,405
+├─ModeTokenizer: 1-7                                    [16, 2184, 155]           (recursive)
+│    └─Embedding: 2-8                                   [16, 2184, 155]           (recursive)
+├─MultiModalAttentionCore: 1-8                          [16, 155, 3, 1279]        --
+│    └─Transformer: 2-9                                 [16, 3838, 155]           --
 │    │    └─ModuleList: 3-18                            --                        (recursive)
 │    │    │    └─ModuleDict: 4-2                        --                        (recursive)
-│    │    │    │    └─Attention: 5-1                    [1, 3838, 155]            384,865
-│    │    └─DropPath: 3-5                               [1, 3838, 155]            --
+│    │    │    │    └─Attention: 5-1                    [16, 3838, 155]           384,865
+│    │    └─DropPath: 3-5                               [16, 3838, 155]           --
 │    │    └─ModuleList: 3-18                            --                        (recursive)
 │    │    │    └─ModuleDict: 4-2                        --                        (recursive)
-│    │    │    │    └─MLP: 5-2                          [1, 3838, 155]            152,233
-│    │    └─DropPath: 3-7                               [1, 3838, 155]            --
+│    │    │    │    └─MLP: 5-2                          [16, 3838, 155]           152,233
+│    │    └─DropPath: 3-7                               [16, 3838, 155]           --
 │    │    └─ModuleList: 3-18                            --                        (recursive)
 │    │    │    └─ModuleDict: 4-4                        --                        (recursive)
-│    │    │    │    └─Attention: 5-3                    [1, 3838, 155]            384,865
-│    │    └─DropPath: 3-9                               [1, 3838, 155]            --
+│    │    │    │    └─Attention: 5-3                    [16, 3838, 155]           384,865
+│    │    └─DropPath: 3-9                               [16, 3838, 155]           --
 │    │    └─ModuleList: 3-18                            --                        (recursive)
 │    │    │    └─ModuleDict: 4-4                        --                        (recursive)
-│    │    │    │    └─MLP: 5-4                          [1, 3838, 155]            152,233
-│    │    └─DropPath: 3-11                              [1, 3838, 155]            --
+│    │    │    │    └─MLP: 5-4                          [16, 3838, 155]           152,233
+│    │    └─DropPath: 3-11                              [16, 3838, 155]           --
 │    │    └─ModuleList: 3-18                            --                        (recursive)
 │    │    │    └─ModuleDict: 4-6                        --                        (recursive)
-│    │    │    │    └─Attention: 5-5                    [1, 3838, 155]            384,865
-│    │    └─DropPath: 3-13                              [1, 3838, 155]            --
+│    │    │    │    └─Attention: 5-5                    [16, 3838, 155]           384,865
+│    │    └─DropPath: 3-13                              [16, 3838, 155]           --
 │    │    └─ModuleList: 3-18                            --                        (recursive)
 │    │    │    └─ModuleDict: 4-6                        --                        (recursive)
-│    │    │    │    └─MLP: 5-6                          [1, 3838, 155]            152,233
-│    │    └─DropPath: 3-15                              [1, 3838, 155]            --
+│    │    │    │    └─MLP: 5-6                          [16, 3838, 155]           152,233
+│    │    └─DropPath: 3-15                              [16, 3838, 155]           --
 │    │    └─ModuleList: 3-18                            --                        (recursive)
 │    │    │    └─ModuleDict: 4-8                        --                        (recursive)
-│    │    │    │    └─Attention: 5-7                    [1, 3838, 155]            384,865
-│    │    └─DropPath: 3-17                              [1, 3838, 155]            --
+│    │    │    │    └─Attention: 5-7                    [16, 3838, 155]           384,865
+│    │    └─DropPath: 3-17                              [16, 3838, 155]           --
 │    │    └─ModuleList: 3-18                            --                        (recursive)
 │    │    │    └─ModuleDict: 4-8                        --                        (recursive)
-│    │    │    │    └─MLP: 5-8                          [1, 3838, 155]            152,233
-│    │    └─DropPath: 3-19                              [1, 3838, 155]            --
-│    └─Rearrange: 2-8                                   [1, 155, 3, 1279]         --
-├─CoreShifters: 1-7                                     [1, 2]                    --
-│    └─CoreShifter: 2-9                                 [1, 2]                    --
-│    │    └─Sequential: 3-20                            [1, 2]                    --
-│    │    │    └─Linear: 4-9                            [1, 5]                    15
-│    │    │    └─Tanh: 4-10                             [1, 5]                    --
-│    │    │    └─Linear: 4-11                           [1, 5]                    30
-│    │    │    └─Tanh: 4-12                             [1, 5]                    --
-│    │    │    └─Linear: 4-13                           [1, 2]                    12
-│    │    │    └─Tanh: 4-14                             [1, 2]                    --
-├─NeuronIDTokenizer: 1-8                                [6552, 150]               (recursive)
-│    └─Embedding: 2-10                                  [6552, 150]               (recursive)
-├─Readouts: 1-9                                         [1, 6552]                 --
-│    └─AttentionReadout: 2-11                           [1, 6552]                 --
+│    │    │    │    └─MLP: 5-8                          [16, 3838, 155]           152,233
+│    │    └─DropPath: 3-19                              [16, 3838, 155]           --
+│    └─Rearrange: 2-10                                  [16, 155, 3, 1279]        --
+├─CoreShifters: 1-9                                     [16, 2]                   --
+│    └─CoreShifter: 2-11                                [16, 2]                   --
+│    │    └─Sequential: 3-20                            [16, 2]                   --
+│    │    │    └─Linear: 4-9                            [16, 5]                   15
+│    │    │    └─Tanh: 4-10                             [16, 5]                   --
+│    │    │    └─Linear: 4-11                           [16, 5]                   30
+│    │    │    └─Tanh: 4-12                             [16, 5]                   --
+│    │    │    └─Linear: 4-13                           [16, 2]                   12
+│    │    │    └─Tanh: 4-14                             [16, 2]                   --
+├─NeuronIDTokenizer: 1-10                               [6552, 150]               (recursive)
+│    └─Embedding: 2-12                                  [6552, 150]               (recursive)
+├─Readouts: 1-11                                        [16, 6552]                --
+│    └─AttentionReadout: 2-13                           [16, 6552]                --
 │    │    └─Linear: 3-21                                [1, 6552, 160]            24,160
 │    │    └─Dropout: 3-22                               [1, 6552, 160]            --
-│    │    └─CrossAttention: 3-23                        [1, 6552, 160]            616,431
+│    │    └─CrossAttention: 3-23                        [16, 6552, 160]           616,431
 │    │    │    └─LayerNorm: 4-15                        [1, 6552, 160]            320
-│    │    │    └─LayerNorm: 4-16                        [1, 3837, 155]            310
-│    │    │    └─Linear: 4-17                           [3837, 320]               49,600
-│    │    └─Dropout: 3-24                               [1, 6552, 160]            --
-│    │    └─Linear: 3-25                                [1, 6552, 1]              161
-├─ELU1: 1-10                                            [1, 6552]                 --
-│    └─ELU: 2-12                                        [1, 6552]                 --
+│    │    │    └─LayerNorm: 4-16                        [16, 3837, 155]           310
+│    │    │    └─Linear: 4-17                           [61392, 320]              49,600
+│    │    └─Dropout: 3-24                               [16, 6552, 160]           --
+│    │    └─Linear: 3-25                                [16, 6552, 1]             161
+├─ELU1: 1-12                                            [16, 6552]                --
+│    └─ELU: 2-14                                        [16, 6552]                --
 =========================================================================================================
-Total params: 4,463,551
-Trainable params: 4,463,551
+Total params: 4,463,861
+Trainable params: 4,463,861
 Non-trainable params: 0
-Total mult-adds (G): 11.69
+Total mult-adds (G): 14.58
 =========================================================================================================
-Input size (MB): 0.25
-Forward/backward pass size (MB): 413.87
+Input size (MB): 2.99
+Forward/backward pass size (MB): 6248.65
 Params size (MB): 14.27
-Estimated Total Size (MB): 428.39
+Estimated Total Size (MB): 6265.91
 =========================================================================================================

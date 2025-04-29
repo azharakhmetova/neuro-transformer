@@ -9,6 +9,8 @@ from einops import rearrange, repeat, einsum
 from torch.utils.checkpoint import checkpoint
 import warnings
 
+from v1t.models.layers import PositionalEncoding
+
 class NeuronIDTokenizer(nn.Module):
     # todo
     # add dictionary module for different latent states
@@ -54,16 +56,21 @@ class SimpleResponsesTokenizer(nn.Module):
         self.device = device
         self.num_input_neurons = int(frac_input_neurons * num_neurons)
         self.samples_per_token = num_samples_per_token
-        self.token_dim = token_dim
         self.tokenizer = nn.Linear(num_samples_per_token, token_dim)
         self.T = self.num_tokens_per_neuron(total_samples_per_neuron)
         self.num_input_tokens = self.num_input_neurons * self.T
         self.output_shape = (self.num_input_tokens, token_dim) 
 
-        self.project_neuron_id = args.emb_dim != args.emb_dim_tokenizer
+        self.project_neuron_id = token_dim != args.emb_dim_tokenizer
         if self.project_neuron_id:
-            self.neuron_id_token_projection = nn.Linear(args.emb_dim_tokenizer, args.emb_dim)
+            self.neuron_id_token_projection = nn.Linear(args.emb_dim_tokenizer, token_dim)
 
+        self.pos_embedding = PositionalEncoding(
+            d_model=token_dim,
+            max_len=self.num_input_tokens,
+            learned=True,
+            mode="1d",
+            )
     def num_tokens_per_neuron(self, S):
         return S // self.samples_per_token
 
@@ -71,39 +78,38 @@ class SimpleResponsesTokenizer(nn.Module):
             self, 
             responses: torch.Tensor, 
             input_neuron_ids: torch.Tensor, 
-            neuron_id_tokenizer: t.Any=None, 
+            # neuron_id_tokenizer: t.Any=None, 
+            neuron_id_tokens: torch.Tensor=None,
             mask: torch.Tensor=None, 
             mask_token=None
     ):
         # todo - this needs validation
         (B, N, S) = responses.shape
-        print("S", S)
-        print("Input device:", responses.device)
+        # print("S", S)
+        # print("Input device:", responses.device)
         responses = responses.to(input_neuron_ids.device)
-        print('input neuron id device', input_neuron_ids.device)
-        print("T", self.T)
-        print("responses shape (B, N, S)", responses.shape)
+        # print('input neuron id device', input_neuron_ids.device)
+        # print("T", self.T)
+        # print("responses shape (B, N, S)", responses.shape)
         responses_subset = responses[:, input_neuron_ids, :].float().to(input_neuron_ids.device) # select only the neurons we are interested in
-        print("responses subset shape (B, N, S)", responses_subset.shape)
-        print("Tokenizer weight device:", self.tokenizer.weight.device)
+        # print("responses subset shape (B, N, S)", responses_subset.shape)
+        # print("Tokenizer weight device:", self.tokenizer.weight.device)
 
         tok = self.tokenizer(
                 responses_subset.view(B, self.num_input_neurons, self.T, self.samples_per_token)
             )
-        print("neuron tokens shape (B, N, N, emb)", tok.shape)
+        tok += self.pos_embedding(tok)
+        # print("neuron tokens shape (B, N, N, emb)", tok.shape)
         if self.use_masking:
             tok = torch.where(mask.view(B, self.num_input_neurons, self.T, 1), tok, mask_token)
 
         if self.project_neuron_id:
-            neuron_id_tok = self.neuron_id_token_projection(neuron_id_tokenizer(input_neuron_ids))
-            print("neuron id tokens shape (B, N, emb)", neuron_id_tok.shape)
+            neuron_id_tok = self.neuron_id_token_projection(neuron_id_tokens)#neuron_id_tokenizer(input_neuron_ids))
+            # print("neuron id tokens shape (B, N, emb)", neuron_id_tok.shape)
         else:
-            neuron_id_tok = neuron_id_tokenizer(input_neuron_ids) 
-
-        tok = tok + neuron_id_tok.unsqueeze(0).unsqueeze(2).repeat(B, 1, self.T, 1) #+ self.session_tokenizer(self.sessions_enc[session]) 
-        # tok is shape B, Neurons, Tokens, Token_dim
-        tok = tok.view(tok.shape[0], -1, tok.shape[-1])
-        print("final token shape (B, N, emb)", tok.shape)
+            neuron_id_tok = neuron_id_tokens #neuron_id_tokenizer(input_neuron_ids) 
+ 
+        # print("final token shape (B, N, emb)", tok.shape)
         return tok
     
 
