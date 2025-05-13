@@ -11,6 +11,25 @@ import warnings
 
 from v1t.models.layers import PositionalEncoding
 
+# class NeuronCoordinatesEncoding(nn.Module):
+#     # todo
+#     # add dictionary module for different latent states
+#     # self.neuron_id_tokenizer = nn.ModuleDict({})
+#     # for key, n_neurons in num_neurons.items():
+#     #     self.neuron_id_tokenizer[key] = nn.Embedding(n_neurons, token_dim, device=device)
+#     def __init__(
+#         self, 
+#         num_neurons: int, 
+#         emb_dim: int,
+#         device,
+#     ):
+#         super(NeuronIDTokenizer, self).__init__()
+#         self.embedding = nn.Embedding(num_neurons, emb_dim)
+#         nn.init.constant_(self.embedding.weight, 1.0 / emb_dim)
+
+#     def forward(self, neuron_ids: torch.Tensor):
+#         return self.embedding(neuron_ids)
+
 class NeuronIDTokenizer(nn.Module):
     # todo
     # add dictionary module for different latent states
@@ -65,7 +84,13 @@ class SimpleResponsesTokenizer(nn.Module):
         if self.project_neuron_id:
             self.neuron_id_token_projection = nn.Linear(args.emb_dim_tokenizer, token_dim)
 
-        self.pos_embedding = PositionalEncoding(
+        # self.coord_embedding = NeuronCoordinatesEncoding(
+        #     d_model=token_dim,
+        #     max_len=self.num_input_tokens,
+        #     learned=True,
+        #     mode="1d",
+        #     )
+        self.pos_embedding = PositionalEncoding( # do we need temporal positional encoding in the future?
             d_model=token_dim,
             max_len=self.num_input_tokens,
             learned=True,
@@ -98,7 +123,7 @@ class SimpleResponsesTokenizer(nn.Module):
         tok = self.tokenizer(
                 responses_subset.view(B, self.num_input_neurons, self.T, self.samples_per_token)
             )
-        tok += self.pos_embedding(tok)
+        # tok += self.pos_embedding(tok)
         # print("neuron tokens shape (B, N, N, emb)", tok.shape)
         if self.use_masking:
             tok = torch.where(mask.view(B, self.num_input_neurons, self.T, 1), tok, mask_token)
@@ -108,7 +133,10 @@ class SimpleResponsesTokenizer(nn.Module):
             # print("neuron id tokens shape (B, N, emb)", neuron_id_tok.shape)
         else:
             neuron_id_tok = neuron_id_tokens #neuron_id_tokenizer(input_neuron_ids) 
- 
+        
+        tok = tok + neuron_id_tok.unsqueeze(0).unsqueeze(2).repeat(B, 1, self.T, 1) #+ self.session_tokenizer(self.sessions_enc[session]) 
+        # tok is shape B, Neurons, Tokens, Token_dim
+        tok = tok.view(tok.shape[0], -1, tok.shape[-1])
         # print("final token shape (B, N, emb)", tok.shape)
         return tok
     

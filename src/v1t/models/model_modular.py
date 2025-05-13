@@ -16,6 +16,7 @@ from v1t.models.layers import PositionalEncoding
 from v1t.models.image_processing import Image2Patches
 from v1t.models.neuron_processing import NeuronIDTokenizer
 from v1t.models.neuron_processing import SimpleResponsesTokenizer 
+# from v1t.models.neuron_processing import NeuronCoordinatesEncoding
 from v1t.utils.tensorboard import Summary
 from v1t.models.core_shifter import CoreShifters
 from v1t.models.image_cropper import ImageCropper
@@ -166,6 +167,7 @@ class Model(nn.Module):
             max_len=list(self.output_shapes.items())[0][1][0],
             mode="1d",
             )
+        self.neuron_coord_pe = nn.Linear(3, args.emb_dim, bias=True)
         # print("core: ", self.core_type)
         if self.core_type == "multimodalattention":
             self.add_module(
@@ -267,6 +269,7 @@ class Model(nn.Module):
         mouse_id: str,
         behaviors: torch.Tensor,
         pupil_centers: torch.Tensor,
+        neuron_coords: torch.Tensor = None,
         neuron_inputs: torch.Tensor = None,
         input_neuron_ids: torch.Tensor = None,
         query_neuron_ids: torch.Tensor = None,
@@ -284,7 +287,7 @@ class Model(nn.Module):
             if neuron_inputs.dim() != 3:
                 neuron_inputs = neuron_inputs.unsqueeze(-1)
             neuron_pos_embedding = self.neuron_pe(neuron_inputs)
-                # print("neuron_pos_embedding shape: ", neuron_pos_embedding.shape)
+            # print("neuron_pos_embedding shape: ", neuron_pos_embedding.shape)
             # print("neuron inputs: ", neuron_inputs.shape)
         # print("images: ", images.shape)
         image_tokens = self.patch_embedding(images) 
@@ -301,7 +304,9 @@ class Model(nn.Module):
             neuron_mode = torch.ones_like(input_neuron_tokens[..., 0], dtype=torch.long, device=input_neuron_tokens.device)
             # print("neuron mode shape ", neuron_mode.shape)
             input_neuron_tokens += self.mode_tokenizer(mode=neuron_mode)
-            input_neuron_tokens += neuron_pos_embedding[:, input_neuron_ids.to(torch.long), :]
+            # print("input_neuron_tokens shape: ", input_neuron_tokens.shape)
+            in_coords = neuron_coords[:, input_neuron_ids, :]    # (B, K, 3)
+            input_neuron_tokens += self.neuron_coord_pe(in_coords) #[:, input_neuron_ids.to(torch.long), :]
         else:
             input_neuron_tokens = None
         outputs = self.core(
@@ -316,7 +321,9 @@ class Model(nn.Module):
         if self.core_shifter is not None:
             shifts = self.core_shifter(pupil_centers, mouse_id=mouse_id)
         if self.readout_type == "attention":
-            neuron_queries = self.neuron_id_tokenizer(neuron_ids=query_neuron_ids.to(torch.long)).unsqueeze(0) + neuron_pos_embedding[:, query_neuron_ids.to(torch.long), :]
+            neuron_queries = self.neuron_id_tokenizer(neuron_ids=query_neuron_ids.to(torch.long)).unsqueeze(0) 
+            query_coords = neuron_coords[:, query_neuron_ids, :]    # (B, K, 3)
+            neuron_queries += self.neuron_coord_pe(query_coords) #[:, query_neuron_ids.to(torch.long), :]
             # neuron_queries = self.readout_neuron_id_tokenizer(neuron_ids=query_neuron_ids.to(torch.long)).unsqueeze(0)
             outputs = self.readouts(outputs, mouse_id=mouse_id, neuron_queries=neuron_queries, shifts=shifts)
             # print("outputs after attention readout: ", outputs.shape)
@@ -355,6 +362,7 @@ def get_model(args, ds: t.Dict[str, DataLoader], summary: Summary = None) -> Mod
         "behaviors": random_input((batch_size, 3)),
         "pupil_centers": random_input((batch_size, 2)),
         "neuron_inputs": random_input((batch_size, N, 1)),
+        "neuron_coords": random_input((batch_size, N, 3)),
         }
     if args.tokenize_neurons:
         K = int(args.frac_input_neurons * N)

@@ -65,6 +65,7 @@ def train_step(
             y_pred, _, _ = model(
                 inputs=micro_batch["image"].to(device),
                 neuron_inputs=micro_batch["response"].to(device),
+                neuron_coords=micro_batch["neuron_coordinates"].to(device),
                 input_neuron_ids=micro_batch["input_neuron_ids"].to(device),
                 query_neuron_ids=micro_batch["query_neuron_ids"].to(device),
                 mouse_id=mouse_id,
@@ -151,6 +152,7 @@ def validation_step(
             y_pred, _, _ = model(
                 inputs=micro_batch["image"].to(device),
                 neuron_inputs=micro_batch["response"].to(device),
+                neuron_coords=micro_batch["neuron_coordinates"].to(device),
                 input_neuron_ids=micro_batch["input_neuron_ids"].to(device),
                 query_neuron_ids=micro_batch["query_neuron_ids"].to(device),
                 mouse_id=mouse_id,

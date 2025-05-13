@@ -466,6 +466,7 @@ class MiceDataset(Dataset):
         data["response"] = self.transform_response(data["response"])
         data["behavior"] = self.transform_behavior(data["behavior"])
         data["pupil_center"] = self.transform_pupil_center(data["pupil_center"])
+        data["neuron_coordinates"] = torch.from_numpy(self.coordinates)
         data["image_id"] = self.image_ids[idx]
         data["trial_id"] = self.trial_ids[idx]
         data["mouse_id"] = self.mouse_id

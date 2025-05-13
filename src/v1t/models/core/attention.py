@@ -331,7 +331,7 @@ class AttentionCore(Core):
         if self.behavior_mode in (3, 4):
             behaviors = torch.cat((behaviors, pupil_centers), dim=-1)
         outputs = self.transformer(outputs, mouse_id=mouse_id, behaviors=behaviors)
-        outputs = outputs[:, 1:, :]  # remove CLS token
+        # outputs = outputs[:, 1:, :]  # remove CLS token
         # add flag to rearrange only if it is a gaussian readout
         outputs = self.rearrange(outputs)
         return outputs
@@ -374,14 +374,22 @@ class MultiModalAttentionCore(Core):
             use_bias=not args.disable_bias,
             grad_checkpointing=args.grad_checkpointing,
         )
+
+        self.image_encoder_num_patches = image_encoder_num_patches
+        self.neuron_num_tokens = neuron_num_tokens
+        self.readout = args.readout
         # calculate latent height and width based on number of tokens 
-        n_tokens=image_encoder_num_patches + neuron_num_tokens - 1
+        if args.readout == "attention":
+            n_tokens = image_encoder_num_patches + neuron_num_tokens
+        elif args.readout == "gaussian2d":
+            n_tokens = image_encoder_num_patches
         h, w = self.find_shape(n_tokens)
         print("patch_embedding.num_patches", image_encoder_num_patches)
         print("neuron_embedding.num_tokens", neuron_num_tokens)
         print("h", h)
         print("w", w)
         self.rearrange = Rearrange("b (h w) c -> b c h w", h=h, w=w)
+        print("transformer output shape", self.transformer.output_shape[-1])
         self.output_shape = (self.transformer.output_shape[-1], h, w)
 
     @staticmethod
@@ -413,7 +421,9 @@ class MultiModalAttentionCore(Core):
             behaviors = torch.cat((behaviors, pupil_centers), dim=-1)
         outputs = self.transformer(outputs, mouse_id=mouse_id, behaviors=behaviors)
         # print("outputs.shape after transformer", outputs.shape)
-        outputs = outputs[:, 1:, :]  # remove CLS token
-        # add flag to rearrange only if it is a gaussian readout
-        outputs = self.rearrange(outputs)
+        if self.readout == "gaussian2d":
+            outputs = outputs[:, :self.image_encoder_num_patches, :]  # subselect image token
+            # print("outputs.shape after subselect", outputs.shape)
+            # add flag to rearrange only if it is a gaussian readout
+        outputs =  self.rearrange(outputs)
         return outputs

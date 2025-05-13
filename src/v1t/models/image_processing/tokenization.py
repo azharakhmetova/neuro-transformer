@@ -98,7 +98,7 @@ class Image2Patches(nn.Module):
                 )
             case _:
                 raise NotImplementedError(f"--patch_mode {patch_mode} not implemented.")
-        self.cls_token = nn.Parameter(torch.randn(1, 1, emb_dim))
+        # self.cls_token = nn.Parameter(torch.randn(1, 1, emb_dim))
         num_patches += 1
         if pe_mode == "1d":
             self.pos_embedding = PositionalEncoding(
@@ -118,7 +118,7 @@ class Image2Patches(nn.Module):
                 learned=False,
                 mode=pe_mode,
                 )
-            self.cls_pe = nn.Parameter(torch.zeros(1, 1, emb_dim))
+            # self.cls_pe = nn.Parameter(torch.zeros(1, 1, emb_dim))
         self.dropout = nn.Dropout(p=dropout)
         self.num_patches = num_patches
         self.output_shape = (num_patches, emb_dim)
@@ -147,17 +147,17 @@ class Image2Patches(nn.Module):
         batch_size = inputs.size(0)
         patches = self.projection(inputs)
         # print("patches.shape", patches.shape)
-        cls_tokens = repeat(self.cls_token, "1 1 d -> b 1 d", b=batch_size)
+        # cls_tokens = repeat(self.cls_token, "1 1 d -> b 1 d", b=batch_size)
         if self.pe_mode == "1d":
-            outputs = torch.cat((cls_tokens, patches), dim=1)
+            # outputs = torch.cat((cls_tokens, patches), dim=1)
             # print("outputs.shape", outputs.shape)
             # print("self.pos_embedding(outputs).shape", self.pos_embedding(outputs).shape)
             outputs += self.pos_embedding(outputs)
         elif self.pe_mode == "2d":
             outputs = patches
             outputs += self.pos_embedding(patches.reshape(batch_size, *self.find_shape(self.num_patches - 1), -1)).reshape(batch_size, self.num_patches - 1, -1)
-            cls_tokens = cls_tokens + self.cls_pe
-            outputs = torch.cat((cls_tokens, patches), dim=1)
+            # cls_tokens = cls_tokens + self.cls_pe
+            # outputs = torch.cat((cls_tokens, patches), dim=1)
         outputs = self.dropout(outputs)
         return outputs
     
