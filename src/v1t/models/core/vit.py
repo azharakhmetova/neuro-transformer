@@ -8,6 +8,8 @@ import torch.nn.functional as F
 from einops.layers.torch import Rearrange
 from einops import rearrange, repeat, einsum
 from torch.utils.checkpoint import checkpoint
+from torch.nn import functional as F
+from torch.nn.attention import SDPBackend, sdpa_kernel
 
 from v1t.models.utils import DropPath
 
@@ -100,8 +102,8 @@ class Image2Patches(nn.Module):
                 )
             case _:
                 raise NotImplementedError(f"--patch_mode {patch_mode} not implemented.")
-        self.cls_token = nn.Parameter(torch.randn(1, 1, emb_dim))
-        num_patches += 1
+        # self.cls_token = nn.Parameter(torch.randn(1, 1, emb_dim))
+        # num_patches += 1
         self.pos_embedding = nn.Parameter(torch.randn(num_patches, emb_dim))
         self.dropout = nn.Dropout(p=dropout)
         self.num_patches = num_patches
@@ -120,11 +122,11 @@ class Image2Patches(nn.Module):
             nn.init.kaiming_normal_(m.weight)
 
     def forward(self, inputs: torch.Tensor):
-        batch_size = inputs.size(0)
+        # batch_size = inputs.size(0)
         patches = self.projection(inputs)
-        cls_tokens = repeat(self.cls_token, "1 1 d -> b 1 d", b=batch_size)
-        outputs = torch.cat((cls_tokens, patches), dim=1)
-        outputs += self.pos_embedding
+        # cls_tokens = repeat(self.cls_token, "1 1 d -> b 1 d", b=batch_size)
+        # outputs = torch.cat((cls_tokens, patches), dim=1)
+        outputs = patches + self.pos_embedding
         outputs = self.dropout(outputs)
         return outputs
 
@@ -263,7 +265,27 @@ class Attention(nn.Module):
         attn = self.dropout(attn)
         outputs = einsum(attn, v, "b h n i, b h i d -> b h n d")
         return outputs
-
+    # def scaled_dot_product_attention(self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor):
+    #     """ 
+    #     q: [B, H, N, D_head]
+    #     k, v: [B, H, S, D_head]
+    #     """
+    #     if q.device.type == "cuda": #and q.dtype in (torch.float16,torch.bfloat16):
+    #         with sdpa_kernel([SDPBackend.FLASH_ATTENTION]):
+    #             return F.scaled_dot_product_attention(
+    #                 q, k, v,
+    #                 attn_mask=self.mask,
+    #                 dropout_p=self.dropout.p,
+    #                 is_causal=False,
+    #             )
+    #     else:
+    #         return F.scaled_dot_product_attention(
+    #         q, k, v,
+    #         attn_mask=self.mask,
+    #         dropout_p=self.dropout.p,
+    #         is_causal=False,
+    #         )
+        
     def mha(self, inputs: torch.Tensor):
         inputs = self.layer_norm(inputs)
         q, k, v = torch.chunk(self.to_qkv(inputs), chunks=3, dim=-1)
@@ -381,6 +403,8 @@ class ViTCore(Core):
         if args.grad_checkpointing and args.verbose:
             print(f"Enable gradient checkpointing in ViT")
 
+        self.readout = args.readout
+
         self.patch_embedding = Image2Patches(
             image_shape=input_shape,
             patch_mode=args.patch_mode,
@@ -404,7 +428,7 @@ class ViTCore(Core):
             grad_checkpointing=args.grad_checkpointing,
         )
         # calculate latent height and width based on num_patches
-        h, w = self.find_shape(self.patch_embedding.num_patches - 1)
+        h, w = self.find_shape(self.patch_embedding.num_patches)
         self.rearrange = Rearrange("b (h w) c -> b c h w", h=h, w=w)
         self.output_shape = (self.transformer.output_shape[-1], h, w)
 
@@ -431,6 +455,7 @@ class ViTCore(Core):
         if self.behavior_mode in (3, 4):
             behaviors = torch.cat((behaviors, pupil_centers), dim=-1)
         outputs = self.transformer(outputs, mouse_id=mouse_id, behaviors=behaviors)
-        outputs = outputs[:, 1:, :]  # remove CLS token
-        outputs = self.rearrange(outputs)
+        # outputs = outputs[:, 1:, :]  # remove CLS token
+        if self.readout == "gaussian2d":
+            outputs = self.rearrange(outputs)
         return outputs

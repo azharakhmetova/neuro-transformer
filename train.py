@@ -8,7 +8,7 @@ from tqdm import tqdm
 from time import time
 from shutil import rmtree
 from torch.utils.data import DataLoader
-from torch.cuda.amp import autocast, GradScaler
+from torch.amp import autocast, GradScaler
 
 from v1t import losses, data
 from v1t.utils.logger import Logger
@@ -54,7 +54,7 @@ def train_step(
     batch_size = batch["image"].size(0)
     result = {"loss/loss": [], "loss/reg_loss": [], "loss/total_loss": []}
     for micro_batch in data.micro_batching(batch, micro_batch_size):
-        with autocast(enabled=scaler.is_enabled(), dtype=torch.float16):
+        with autocast(device_type=device.type, enabled=scaler.is_enabled(), dtype=torch.float16):
             y_true = micro_batch["response"].to(device)
             y_pred, _, _ = model(
                 inputs=micro_batch["image"].to(device),
@@ -131,7 +131,7 @@ def validation_step(
     result = {"loss/loss": [], "loss/reg_loss": [], "loss/total_loss": []}
     targets, predictions = [], []
     for micro_batch in data.micro_batching(batch, micro_batch_size):
-        with autocast(enabled=scaler.is_enabled(), dtype=torch.float16):
+        with autocast(device_type=device.type, enabled=scaler.is_enabled(), dtype=torch.float16):
             y_true = micro_batch["response"].to(device)
             y_pred, _, _ = model(
                 inputs=micro_batch["image"].to(device),
@@ -405,7 +405,7 @@ if __name__ == "__main__":
         "--device",
         type=str,
         default="",
-        choices=["cpu", "cuda", "mps"],
+        choices=["cpu", "cuda", "cuda:0", "cuda:1", "cuda:2", "cuda:3", "cuda:4", "cuda:5", "cuda:6", "cuda:7", "mps"],
         help="Device to use for computation. "
         "Use the best available device if --device is not specified.",
     )
@@ -482,6 +482,7 @@ if __name__ == "__main__":
 
     # wandb settings
     parser.add_argument("--use_wandb", action="store_true")
+    parser.add_argument("--wandb_project", type=str, default="sensorium")
     parser.add_argument("--wandb_group", type=str, default="")
 
     # misc
@@ -560,7 +561,7 @@ if __name__ == "__main__":
             )
             parser.add_argument("--num_blocks", type=int, default=4)
             parser.add_argument("--num_heads", type=int, default=4)
-            parser.add_argument("--emb_dim", type=int, default=155)
+            parser.add_argument("--emb_dim", type=int, default=156)
             parser.add_argument("--mlp_dim", type=int, default=488)
             parser.add_argument(
                 "--p_dropout",
@@ -646,6 +647,11 @@ if __name__ == "__main__":
             "2: initialize bias with the mean responses divide by standard deviation",
         )
         parser.add_argument("--readout_reg_scale", type=float, default=0.0076)
+    elif temp_args.readout == "attention":
+        # parser.add_argument("--num_heads", type=int, default=4)
+        # parser.add_argument("--emb_dim", type=int, default=155)
+        parser.add_argument("--readout_reg_scale", type=float, default=0.0076)
+        parser.add_argument("--dropout", type=float, default=0.2544)
     else:
         parser.add_argument("--readout_reg_scale", type=float, default=0.0)
 

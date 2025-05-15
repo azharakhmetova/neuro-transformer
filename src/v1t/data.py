@@ -24,6 +24,7 @@ SENSORIUM = {
     "C": "static23343-5-17-GrayImageNet-94c6ff995dac583098847cfecd43e7b6",
     "D": "static23656-14-22-GrayImageNet-94c6ff995dac583098847cfecd43e7b6",
     "E": "static23964-4-22-GrayImageNet-94c6ff995dac583098847cfecd43e7b6",
+    "1_s3_45": "s3_c2_25_12.5_2_12_2_4_45deg"
 }
 
 FRANKE2022 = {
