@@ -43,7 +43,7 @@ class CrossAttention(nn.Module):
         self.value_embedding = value_embedding
         self.use_bias = use_bias
 
-        self.input_shape = input_shape
+        self.input_shape = input_shape # (t, c)
         self.num_neurons = num_neurons
         self.emb_dim = emb_dim
         self.heads = num_heads
@@ -61,17 +61,17 @@ class CrossAttention(nn.Module):
 
         # LayerNorm for queries and inputs
         self.layer_norm = nn.LayerNorm(self.emb_dim)
-        self.layer_norm_inputs = nn.LayerNorm(self.input_shape[0])
+        self.layer_norm_inputs = nn.LayerNorm(self.input_shape[1])
 
         # Key/Value projection layer (if enabled)
         if self.key_embedding and self.value_embedding:
-            self.to_kv = nn.Linear(in_features=self.input_shape[0], out_features=self.emb_dim * 2, bias=False)
+            self.to_kv = nn.Linear(in_features=self.input_shape[1], out_features=self.emb_dim * 2, bias=False)
         elif self.key_embedding:
-            self.to_key = nn.Linear(in_features=self.input_shape[0], out_features=self.emb_dim, bias=False)
+            self.to_key = nn.Linear(in_features=self.input_shape[1], out_features=self.emb_dim, bias=False)
 
         # Optional positional embedding
         self.positional_embedding = nn.Parameter(
-            torch.randn(1, input_shape[1] * input_shape[2], input_shape[0])
+            torch.randn(1, self.input_shape[0], self.input_shape[1])
         ) if use_pos_embedding else None
 
         # Reshaping utility for attention
@@ -101,7 +101,8 @@ class CrossAttention(nn.Module):
     #     k, v: [B, H, S, D_head]
     #     """
     #     if q.device.type == "cuda":
-    #         # Dispatch through FlashAttention (or fall back) via PyTorch’s sdpa_kernel
+    #         # Dispatch through FlashAttention (or fall back) via PyTorch’s 
+    #         # print("Using FlashAttention")
     #         with sdpa_kernel([SDPBackend.FLASH_ATTENTION]):
     #             out = F.scaled_dot_product_attention(
     #                 q, k, v,
@@ -110,6 +111,7 @@ class CrossAttention(nn.Module):
     #                 is_causal=False
     #             )
     #     else:
+    #         print("Using standard attention")
     #         out = F.scaled_dot_product_attention(
     #             q, k, v,
     #             attn_mask=None,
@@ -172,7 +174,7 @@ class AttentionReadout(Readout):
     def __init__(
         self,
         args,
-        input_shape: tuple,
+        input_shape: tuple, # output of core (num_tokens, num_channels)
         output_shape: tuple,
         ds: DataLoader,
         num_heads: int = 2,
@@ -214,27 +216,32 @@ class AttentionReadout(Readout):
         self.neuron_tokenizer = NeuronTokenizer(num_neurons=self.num_neurons, emb_dim=emb_dim)
         self.neuron_projection = nn.Linear(in_features=emb_dim, out_features=1, bias=True)
 
-    def forward(self, inputs: torch.Tensor, neuron_ids: torch.Tensor = None, query_neuron_subset: bool = False, shifts: torch.Tensor = None): 
-        b, c, w, h = inputs.size()
-        c_in, w_in, h_in = self.input_shape
+    def forward(self, inputs: torch.Tensor, neuron_ids: torch.Tensor = None, shifts: torch.Tensor = None): 
+        # print("readout inputs shape: ", inputs.shape) # (B, num_tokens, num_channels)
+        # print("readout self.input_shape: ", self.input_shape) # (num_tokens, num_channels)
+        b, t, c = inputs.size()
+        t_in, c_in = self.input_shape
 
-        if (c_in, w_in, h_in) != (c, w, h):
+        if (c_in, t_in) != (c, t):
             warnings.warn("Mismatch between expected and actual input shape.")
 
-        if not query_neuron_subset:
+        # neuron_ids = torch.arange(self.num_neurons, device=inputs.device).unsqueeze(0).expand(b, -1)
+        if neuron_ids is None:
             neuron_ids = torch.arange(self.num_neurons, device=inputs.device).unsqueeze(0).expand(b, -1)
         else:
-            neuron_ids = torch.tensor(neuron_ids, device=inputs.device).unsqueeze(0).expand(b, -1)
+            neuron_ids = neuron_ids.clone().to(inputs.device).unsqueeze(0).expand(b, -1)
 
         neuron_queries = self.neuron_tokenizer(neuron_ids)
         neuron_queries = self.dropout(neuron_queries)
+        #print("readout neuron_queries shape: ", neuron_queries.shape) # [B, N_neurons, emb_dim]
 
-        inputs = rearrange(inputs, 'b c h w -> b (h w) c')  # flatten spatial dims
+        # inputs = rearrange(inputs, 'b c h w -> b (h w) c')  # flatten spatial dims
 
         outputs = self.cross_attention(q=neuron_queries, inputs=inputs)
-        outputs = self.dropout(outputs)
+        outputs = self.dropout(outputs) # [B, N_neurons, emb_dim]
+        # print("readout outputs shape: ", outputs.shape)
         outputs = self.neuron_projection(outputs).squeeze(-1)  # [B, N_neurons]
-
+        # print("readout outputs after projection shape: ", outputs.shape)
         return outputs
 
     def feature_l1(self, reduction: str = "sum"):

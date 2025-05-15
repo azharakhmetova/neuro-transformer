@@ -279,6 +279,7 @@ class Attention(nn.Module):
     #                 is_causal=False,
     #             )
     #     else:
+    #         print("Using standard attention in core")
     #         return F.scaled_dot_product_attention(
     #         q, k, v,
     #         attn_mask=self.mask,
@@ -353,8 +354,7 @@ class Transformer(nn.Module):
                 )
             self.blocks.append(block)
         self.drop_path = DropPath(dropout=drop_path)
-        self.output_shape = (input_shape[0], emb_dim)
-
+        self.output_shape = (input_shape[0], emb_dim) # (num_patches, emb_dim)
         self.apply(self.init_weight)
 
     @staticmethod
@@ -381,6 +381,7 @@ class Transformer(nn.Module):
                 outputs = outputs + b_latent
             outputs = self.drop_path(block["mha"](outputs)) + outputs
             outputs = self.drop_path(block["mlp"](outputs)) + outputs
+        # outputs: (1, num_patches, emb_dim)
         return outputs
 
 
@@ -430,7 +431,10 @@ class ViTCore(Core):
         # calculate latent height and width based on num_patches
         h, w = self.find_shape(self.patch_embedding.num_patches)
         self.rearrange = Rearrange("b (h w) c -> b c h w", h=h, w=w)
-        self.output_shape = (self.transformer.output_shape[-1], h, w)
+        if self.readout == "gaussian2d":
+            self.output_shape = (self.transformer.output_shape[-1], h, w)
+        else:
+            self.output_shape = self.transformer.output_shape
 
     @staticmethod
     def find_shape(num_patches: int):
@@ -458,4 +462,5 @@ class ViTCore(Core):
         # outputs = outputs[:, 1:, :]  # remove CLS token
         if self.readout == "gaussian2d":
             outputs = self.rearrange(outputs)
+        # print("core outputs shape", outputs.shape)
         return outputs

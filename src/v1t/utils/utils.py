@@ -86,6 +86,7 @@ def inference(
         for micro_batch in data.micro_batching(batch, batch_size=micro_batch_size):
             predictions, _, _ = model(
                 inputs=micro_batch["image"].to(device),
+                query_neuron_ids=micro_batch["query_neuron_ids"].to(device),
                 mouse_id=mouse_id,
                 behaviors=micro_batch["behavior"].to(device),
                 pupil_centers=micro_batch["pupil_center"].to(device),
@@ -231,8 +232,10 @@ def plot_samples(
             for micro_batch in data.micro_batching(batch, args.micro_batch_size):
                 with autocast(device_type=device.type, dtype=torch.float16):
                     images = micro_batch["image"]
+                    print("query_neuron_ids", micro_batch["query_neuron_ids"])
                     predictions, crop_images, image_grids = model(
                         inputs=images.to(device),
+                        query_neuron_ids=micro_batch["query_neuron_ids"].to(device),
                         mouse_id=mouse_id,
                         pupil_centers=micro_batch["pupil_center"].to(device),
                         behaviors=micro_batch["behavior"].to(device),
@@ -439,9 +442,15 @@ def compute_micro_batch_size(
             for _ in range(batch_iterations):
                 for mouse_id in mouse_ids:
                     batch_loss = 0.0
+                    if args.frac_input_neurons == 1.0:
+                        query_neuron_ids = torch.arange(args.output_shapes[mouse_id][0]).view(-1).to(device)
+                    else:                    
+                        query_neuron_ids = torch.arange(int(args.frac_input_neurons * args.output_shapes[mouse_id][0]), args.output_shapes[mouse_id][0]).view(-1).to(device)
                     for _ in range(micro_iterations):
                         outputs, _, _ = model(
                             inputs=random_input((micro_batch_size, *image_shape)),
+                            # input_neuron_ids=torch.arange(int(args.frac_input_neurons * args.output_shapes[mouse_id][0])).view(-1).to(device),
+                            query_neuron_ids=query_neuron_ids,
                             mouse_id=mouse_id,
                             behaviors=random_input((micro_batch_size, 3)),
                             pupil_centers=random_input((micro_batch_size, 2)),
@@ -458,11 +467,14 @@ def compute_micro_batch_size(
                     total_loss.backward()
                 optimizer.step()
                 optimizer.zero_grad()
-            micro_batch_size += 7 if micro_batch_size == 1 else 8
+            micro_batch_size += args.micro_batch_step_size
+            # micro_batch_size += 7 if micro_batch_size == 1 else 8
         except RuntimeError:
             if args.verbose:
                 print(f"OOM at micro batch size {micro_batch_size}")
-            micro_batch_size -= 7 if micro_batch_size == 8 else 8
+             # if we OOM’d right at the start, don’t back off further
+            if micro_batch_size != args.start_micro_batch_size:
+                micro_batch_size -= args.micro_batch_step_size
             break
     del train_ds, model, optimizer, criterion
     torch.cuda.empty_cache()

@@ -154,6 +154,7 @@ class Model(nn.Module):
         mouse_id: str,
         behaviors: torch.Tensor,
         pupil_centers: torch.Tensor,
+        query_neuron_ids: torch.Tensor = None,
         activate: bool = True,
     ):
         images, image_grids = self.image_cropper(
@@ -162,16 +163,18 @@ class Model(nn.Module):
             behaviors=behaviors,
             pupil_centers=pupil_centers,
         )
-        outputs = self.core(
+        outputs = self.core(    # (B, num_tokens, num_channels)
             images,
             mouse_id=mouse_id,
             behaviors=behaviors,
             pupil_centers=pupil_centers,
         )
+        # print("model core output shape: ", outputs.shape)
         shifts = None
         if self.core_shifter is not None:
             shifts = self.core_shifter(pupil_centers, mouse_id=mouse_id)
-        outputs = self.readouts(outputs, mouse_id=mouse_id, shifts=shifts)
+        outputs = self.readouts(outputs, mouse_id=mouse_id, neuron_ids=query_neuron_ids, shifts=shifts) # (B, num_neurons)
+        # print("model readout output shape: ", outputs.shape)
         if activate:
             outputs = self.elu1(outputs)
         return outputs, images, image_grids
@@ -179,7 +182,7 @@ class Model(nn.Module):
 
 def get_model(args, ds: t.Dict[str, DataLoader], summary: Summary = None) -> Model:
     model = Model(args, ds=ds)
-
+    print("get model")
     if hasattr(args, "pretrain_core") and args.pretrain_core:
         load_pretrain_core(args, model=model, device=args.device)
         model.core.freeze()
@@ -188,13 +191,26 @@ def get_model(args, ds: t.Dict[str, DataLoader], summary: Summary = None) -> Mod
     mouse_id = args.mouse_ids[0]
     batch_size = args.micro_batch_size
     random_input = lambda size: torch.rand(*size)
+    N = list(model.output_shapes.items())[0][1][0]
+    print("N neurons", N)
+    input_data={
+        "inputs": random_input((batch_size, *model.input_shape)),
+        "behaviors": random_input((batch_size, 3)),
+        "pupil_centers": random_input((batch_size, 2)),
+    }
+    if args.tokenize_neurons and args.frac_input_neurons == 1.0:
+        input_data["query_neuron_ids"] = torch.arange(N, dtype=torch.long, device="cpu")#.view(-1)
+    elif args.tokenize_neurons:
+        K = int(args.frac_input_neurons * N)
+        # input_data["input_neuron_ids"] = torch.arange(K, dtype=torch.long, device="cpu")#.view(-1)
+        input_data["query_neuron_ids"] = torch.arange(K, N, dtype=torch.long, device="cpu")#.view(-1)
+    else:
+        # input_data["input_neuron_ids"] = None
+        input_data["query_neuron_ids"] = None
+    print("input data ids", input_data["query_neuron_ids"])
     model_info = get_model_info(
         model=model,
-        input_data={
-            "inputs": random_input((batch_size, *model.input_shape)),
-            "behaviors": random_input((batch_size, 3)),
-            "pupil_centers": random_input((batch_size, 2)),
-        },
+        input_data=input_data,
         mouse_id=mouse_id,
         filename=os.path.join(args.output_dir, "model.txt"),
         summary=summary,
@@ -224,6 +240,6 @@ def get_model(args, ds: t.Dict[str, DataLoader], summary: Summary = None) -> Mod
         summary=summary,
         tag=f"model/trainable_parameters/Mouse{mouse_id}Readout",
     )
-
+    print("exit get_model")
     model.to(args.device)
     return model
