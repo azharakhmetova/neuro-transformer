@@ -11,7 +11,7 @@ from torch.utils.data import DataLoader
 from v1t.models.core import get_core
 from v1t.models.readout import Readouts
 from v1t.models.neuron_processing import NeuronIDTokenizer
-from v1t.models.stimuli_processing import Image2Patches
+from v1t.models.image_processing import Image2Patches
 from v1t.utils.tensorboard import Summary
 from v1t.models.core_shifter import CoreShifters
 from v1t.models.image_cropper import ImageCropper
@@ -77,11 +77,22 @@ class Model(nn.Module):
             "image_cropper",
             module=ImageCropper(args, ds=ds),
         )
+        self.patch_embedding = Image2Patches(
+            image_shape=self.image_cropper.output_shape,
+            patch_mode=args.patch_mode,
+            patch_size=args.patch_size,
+            stride=args.patch_stride,
+            emb_dim=args.emb_dim_image,
+            dropout=args.p_dropout,
+        )
+
         self.add_module(
             name="core",
             module=get_core(args)(
                 args,
                 input_shape=self.image_cropper.output_shape,
+                image_encoder_output_shape=self.patch_embedding.output_shape,
+                image_encoder_num_patches=self.patch_embedding.num_patches,
             ),
         )
         if self.shift_mode in (2, 3, 4):
@@ -125,6 +136,14 @@ class Model(nn.Module):
                     "name": "neuron_id_tokenizer",
                 }
             )
+        
+        params.append(
+            {
+                "params": self.patch_embedding.parameters(),
+                "lr": core_lr,
+                "name": "patch_embedding",
+            }
+        )
 
         if not self.core.frozen:
             params.append(
@@ -185,9 +204,10 @@ class Model(nn.Module):
         # if self.frac_input_neurons > 0:
         #     raise NotImplementedError("fraction of input neurons not implemented")
         # else:
+        image_tokens = self.patch_embedding(images) 
 
         outputs = self.core(    # (B, num_tokens, num_channels)
-            images,
+            image_tokens=image_tokens,
             mouse_id=mouse_id,
             behaviors=behaviors,
             pupil_centers=pupil_centers,
@@ -248,7 +268,7 @@ def get_model(args, ds: t.Dict[str, DataLoader], summary: Summary = None) -> Mod
     get_model_info(
         model=model.core,
         input_data={
-            "inputs": random_input((batch_size, *model.core.input_shape)),
+            "image_tokens": random_input((batch_size, *model.patch_embedding.output_shape)),
             "behaviors": random_input((batch_size, 3)),
             "pupil_centers": random_input((batch_size, 2)),
         },

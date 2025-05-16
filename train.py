@@ -536,7 +536,7 @@ if __name__ == "__main__":
         "4 - shift_mode=3 and provide both behavior and pupil center to cropper",
     )
     parser.add_argument("--tokenize_neurons", action="store_true")
-    parser.add_argument("--emb_dim_patches", type=int, default=150)
+    parser.add_argument("--emb_dim_image", type=int, default=150)
 
     temp_args = parser.parse_known_args()[0]
 

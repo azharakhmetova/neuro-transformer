@@ -14,123 +14,6 @@ from torch.nn.attention import SDPBackend, sdpa_kernel
 from v1t.models.utils import DropPath
 
 
-class PatchShifting(nn.Module):
-    """Patch shifting for Shifted Patch Tokenization"""
-
-    def __init__(self, patch_size: int):
-        super(PatchShifting, self).__init__()
-        self.shift = int(patch_size * (1 / 2))
-
-    def forward(self, inputs: torch.Tensor):
-        """4 diagonal directions padding"""
-        padded_inputs = F.pad(
-            input=inputs,
-            pad=(self.shift, self.shift, self.shift, self.shift),
-            mode="constant",
-            value=0,
-        )
-        left_upper = padded_inputs[..., : -self.shift * 2, : -self.shift * 2]
-        right_upper = padded_inputs[..., : -self.shift * 2, self.shift * 2 :]
-        left_bottom = padded_inputs[..., self.shift * 2 :, : -self.shift * 2]
-        right_bottom = padded_inputs[..., self.shift * 2 :, self.shift * 2 :]
-        outputs = torch.cat(
-            [inputs, left_upper, right_upper, left_bottom, right_bottom],
-            dim=1,
-        )
-        return outputs
-
-
-class Image2Patches(nn.Module):
-    """
-    patch embedding mode:
-        0 - nn.Unfold to extract patches
-        1 - nn.Conv2D to extract patches
-        2 - Shifted Patch Tokenization https://arxiv.org/abs/2112.13492v1
-        3 - nn.Unfold with Dual PatchNorm https://openreview.net/forum?id=jgMqve6Qhw
-    """
-
-    def __init__(
-        self,
-        image_shape: t.Tuple[int, int, int],
-        patch_mode: int,
-        patch_size: int,
-        stride: int,
-        emb_dim: int,
-        dropout: float = 0.0,
-    ):
-        super(Image2Patches, self).__init__()
-        assert 1 <= stride <= patch_size
-        c, h, w = image_shape
-        self.input_shape = image_shape
-
-        num_patches = self.unfold_dim(h, w, patch_size=patch_size, stride=stride)
-        match patch_mode:
-            case 0:
-                patch_dim = patch_size * patch_size * c
-                self.projection = nn.Sequential(
-                    nn.Unfold(kernel_size=patch_size, stride=stride),
-                    Rearrange("b c l -> b l c"),
-                    nn.Linear(in_features=patch_dim, out_features=emb_dim),
-                )
-            case 1:
-                self.projection = nn.Sequential(
-                    nn.Conv2d(
-                        in_channels=c,
-                        out_channels=emb_dim,
-                        kernel_size=patch_size,
-                        stride=stride,
-                    ),
-                    Rearrange("b c h w -> b (h w) c"),
-                )
-            case 2:
-                patch_dim = patch_size * patch_size * (c + 4)
-                self.projection = nn.Sequential(
-                    PatchShifting(patch_size=patch_size),
-                    nn.Unfold(kernel_size=patch_size, stride=stride),
-                    Rearrange("b c l -> b l c"),
-                    nn.LayerNorm(normalized_shape=patch_dim),
-                    nn.Linear(in_features=patch_dim, out_features=emb_dim),
-                )
-            case 3:
-                patch_dim = patch_size * patch_size * c
-                self.projection = nn.Sequential(
-                    nn.Unfold(kernel_size=patch_size, stride=stride),
-                    Rearrange("b c l -> b l c"),
-                    nn.LayerNorm(normalized_shape=patch_dim),
-                    nn.Linear(in_features=patch_dim, out_features=emb_dim),
-                    nn.LayerNorm(normalized_shape=emb_dim),
-                )
-            case _:
-                raise NotImplementedError(f"--patch_mode {patch_mode} not implemented.")
-        # self.cls_token = nn.Parameter(torch.randn(1, 1, emb_dim))
-        # num_patches += 1
-        self.pos_embedding = nn.Parameter(torch.randn(num_patches, emb_dim))
-        self.dropout = nn.Dropout(p=dropout)
-        self.num_patches = num_patches
-        self.output_shape = (num_patches, emb_dim)
-
-        self.apply(self.init_weight)
-
-    @staticmethod
-    def unfold_dim(h: int, w: int, patch_size: int, padding: int = 0, stride: int = 1):
-        l = lambda s: math.floor(((s + 2 * padding - patch_size) / stride) + 1)
-        return l(h) * l(w)
-
-    @staticmethod
-    def init_weight(m: nn.Module):
-        if isinstance(m, nn.Conv2d):
-            nn.init.kaiming_normal_(m.weight)
-
-    def forward(self, inputs: torch.Tensor):
-        # batch_size = inputs.size(0)
-        patches = self.projection(inputs)
-        # cls_tokens = repeat(self.cls_token, "1 1 d -> b 1 d", b=batch_size)
-        # outputs = torch.cat((cls_tokens, patches), dim=1)
-        outputs = patches + self.pos_embedding
-        outputs = self.dropout(outputs)
-        return outputs
-
-
 class MLP(nn.Module):
     def __init__(
         self,
@@ -391,6 +274,8 @@ class ViTCore(Core):
         self,
         args,
         input_shape: t.Tuple[int, int, int],
+        image_encoder_output_shape: t.Tuple[int, int],
+        image_encoder_num_patches: int,
         name: str = "ViTCore",
     ):
         super(ViTCore, self).__init__(args, input_shape=input_shape, name=name)
@@ -406,17 +291,17 @@ class ViTCore(Core):
 
         self.readout = args.readout
 
-        self.patch_embedding = Image2Patches(
-            image_shape=input_shape,
-            patch_mode=args.patch_mode,
-            patch_size=args.patch_size,
-            stride=args.patch_stride,
-            emb_dim=args.emb_dim,
-            dropout=args.p_dropout,
-        )
+        # self.patch_embedding = Image2Patches(
+        #     image_shape=input_shape,
+        #     patch_mode=args.patch_mode,
+        #     patch_size=args.patch_size,
+        #     stride=args.patch_stride,
+        #     emb_dim=args.emb_dim_core,
+        #     dropout=args.p_dropout,
+        # )
         self.transformer = Transformer(
-            input_shape=self.patch_embedding.output_shape,
-            emb_dim=args.emb_dim,
+            input_shape=(image_encoder_output_shape[0], image_encoder_output_shape[1]),
+            emb_dim=args.emb_dim_core,
             num_blocks=args.num_blocks,
             num_heads=args.num_heads,
             mlp_dim=args.mlp_dim,
@@ -428,11 +313,16 @@ class ViTCore(Core):
             use_bias=not args.disable_bias,
             grad_checkpointing=args.grad_checkpointing,
         )
+        self.image_encoder_num_patches = image_encoder_num_patches
+        self.project_image = args.emb_dim_image != args.emb_dim_core
+        if self.project_image:
+            self.image_projection = nn.Linear(in_features=args.emb_dim_image, out_features=args.emb_dim_core, bias=False)
+
         # calculate latent height and width based on num_patches
-        h, w = self.find_shape(self.patch_embedding.num_patches)
-        self.rearrange = Rearrange("b (h w) c -> b c h w", h=h, w=w)
         if self.readout == "gaussian2d":
+            h, w = self.find_shape(image_encoder_num_patches)
             self.output_shape = (self.transformer.output_shape[-1], h, w)
+            self.rearrange = Rearrange("b (h w) c -> b c h w", h=h, w=w)
         else:
             self.output_shape = self.transformer.output_shape
 
@@ -450,12 +340,14 @@ class ViTCore(Core):
 
     def forward(
         self,
-        inputs: torch.Tensor,
+        image_tokens: torch.Tensor,
         mouse_id: str,
         behaviors: torch.Tensor,
         pupil_centers: torch.Tensor,
     ):
-        outputs = self.patch_embedding(inputs)
+        outputs = image_tokens
+        if self.project_image:
+            outputs = self.image_projection(outputs)
         if self.behavior_mode in (3, 4):
             behaviors = torch.cat((behaviors, pupil_centers), dim=-1)
         outputs = self.transformer(outputs, mouse_id=mouse_id, behaviors=behaviors)

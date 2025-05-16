@@ -457,7 +457,7 @@ def collate_with_neuron_ids(batch, tokenize_neurons: bool = False, frac_input_ne
         batch["input_neuron_ids"] = perm[:K]
         batch["query_neuron_ids"] = perm[K:]
         if K == N:
-            batch["query_neuron_ids"] = torch.arange(N).to(batch["response"].device) #perm
+            batch["query_neuron_ids"] = perm#torch.arange(N).to(batch["response"].device) 
     else:
         batch["input_neuron_ids"] = None
         batch["query_neuron_ids"] = None       
