@@ -81,5 +81,5 @@ class Readouts(nn.ModuleDict):
     def regularizer(self, mouse_id: int, reduction: str = "sum"):
         return self[str(mouse_id)].regularizer(reduction=reduction)
 
-    def forward(self, inputs: torch.Tensor, mouse_id: str, neuron_ids: torch.Tensor = None, shifts: torch.Tensor = None):
-        return self[mouse_id](inputs, neuron_ids=neuron_ids, shifts=shifts)
+    def forward(self, inputs: torch.Tensor, mouse_id: str, query_neurons: torch.Tensor = None, shifts: torch.Tensor = None):
+        return self[mouse_id](inputs, query_neurons=query_neurons, shifts=shifts)

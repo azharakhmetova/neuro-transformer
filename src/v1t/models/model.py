@@ -10,6 +10,8 @@ from torch.utils.data import DataLoader
 
 from v1t.models.core import get_core
 from v1t.models.readout import Readouts
+from v1t.models.neuron_processing import NeuronIDTokenizer
+from v1t.models.stimuli_processing import Image2Patches
 from v1t.utils.tensorboard import Summary
 from v1t.models.core_shifter import CoreShifters
 from v1t.models.image_cropper import ImageCropper
@@ -66,6 +68,10 @@ class Model(nn.Module):
         self.input_shape = args.input_shape
         self.output_shapes = args.output_shapes
         self.shift_mode = args.shift_mode
+        self.readout_type = args.readout
+        self.tokenize_neurons = args.tokenize_neurons
+        if self.tokenize_neurons == 1:
+            self.neuron_id_tokenizer = NeuronIDTokenizer(num_neurons=list(self.output_shapes.items())[0][1][0], emb_dim=args.emb_dim_n_id)#, device=args.device)
 
         self.add_module(
             "image_cropper",
@@ -113,6 +119,13 @@ class Model(nn.Module):
 
         # separate learning rate for core module from the rest
         params = []
+        params.append(
+                {
+                    "params": self.neuron_id_tokenizer.parameters(),
+                    "name": "neuron_id_tokenizer",
+                }
+            )
+
         if not self.core.frozen:
             params.append(
                 {
@@ -137,9 +150,14 @@ class Model(nn.Module):
                 }
             )
         return params
+    
+    def tokenizer_l2(self, reduction: str = "sum"):
+        l2 = self.neuron_id_tokenizer.embedding.weight.pow(2)
+        return l2.sum() if reduction == "sum" else l2.mean()
 
     def regularizer(self, mouse_id: str):
         reg = 0
+        reg += self.tokenizer_l2(reduction="sum") * 0.0076
         if not self.core.frozen:
             reg += self.core.regularizer()
         reg += self.readouts.regularizer(mouse_id=mouse_id)
@@ -163,6 +181,11 @@ class Model(nn.Module):
             behaviors=behaviors,
             pupil_centers=pupil_centers,
         )
+
+        # if self.frac_input_neurons > 0:
+        #     raise NotImplementedError("fraction of input neurons not implemented")
+        # else:
+
         outputs = self.core(    # (B, num_tokens, num_channels)
             images,
             mouse_id=mouse_id,
@@ -173,7 +196,10 @@ class Model(nn.Module):
         shifts = None
         if self.core_shifter is not None:
             shifts = self.core_shifter(pupil_centers, mouse_id=mouse_id)
-        outputs = self.readouts(outputs, mouse_id=mouse_id, neuron_ids=query_neuron_ids, shifts=shifts) # (B, num_neurons)
+        
+        if self.readout_type == "attention":
+            query_neurons = self.neuron_id_tokenizer(neuron_ids=query_neuron_ids.to(torch.long)).unsqueeze(0) # (B, K, emb_dim_n_id)
+        outputs = self.readouts(outputs, mouse_id=mouse_id, query_neurons=query_neurons, shifts=shifts) # (B, num_neurons)
         # print("model readout output shape: ", outputs.shape)
         if activate:
             outputs = self.elu1(outputs)
@@ -207,7 +233,6 @@ def get_model(args, ds: t.Dict[str, DataLoader], summary: Summary = None) -> Mod
     else:
         # input_data["input_neuron_ids"] = None
         input_data["query_neuron_ids"] = None
-    print("input data ids", input_data["query_neuron_ids"])
     model_info = get_model_info(
         model=model,
         input_data=input_data,
@@ -235,7 +260,10 @@ def get_model(args, ds: t.Dict[str, DataLoader], summary: Summary = None) -> Mod
     # get readout summary
     get_model_info(
         model=model.readouts[mouse_id],
-        input_data={"inputs": random_input((batch_size, *model.core.output_shape))},
+        input_data={
+            "inputs": random_input((batch_size, *model.core.output_shape)),
+            "query_neurons": random_input((batch_size, K, args.emb_dim_n_id)),
+            },
         filename=os.path.join(args.output_dir, "model_readout.txt"),
         summary=summary,
         tag=f"model/trainable_parameters/Mouse{mouse_id}Readout",

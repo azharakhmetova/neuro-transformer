@@ -536,11 +536,13 @@ if __name__ == "__main__":
         "4 - shift_mode=3 and provide both behavior and pupil center to cropper",
     )
     parser.add_argument("--tokenize_neurons", action="store_true")
+    parser.add_argument("--emb_dim_patches", type=int, default=150)
 
     temp_args = parser.parse_known_args()[0]
 
     if temp_args.tokenize_neurons == 1:
-        parser.add_argument("--emb_dim_tokenizer", type=int, default=150)
+        parser.add_argument("--emb_dim_n_id", type=int, default=150)
+        parser.add_argument("--emb_dim_n_response", type=int, default=150)
         parser.add_argument("--frac_input_neurons", type=float, default=0.0)
 
     # hyper-parameters for core module
@@ -583,7 +585,7 @@ if __name__ == "__main__":
             )
             parser.add_argument("--num_blocks", type=int, default=4)
             parser.add_argument("--num_heads", type=int, default=4)
-            parser.add_argument("--emb_dim", type=int, default=156)
+            parser.add_argument("--emb_dim_core", type=int, default=156)
             parser.add_argument("--mlp_dim", type=int, default=488)
             parser.add_argument(
                 "--p_dropout",
@@ -671,7 +673,7 @@ if __name__ == "__main__":
         parser.add_argument("--readout_reg_scale", type=float, default=0.0076)
     elif temp_args.readout == "attention":
         # parser.add_argument("--num_heads", type=int, default=4)
-        # parser.add_argument("--emb_dim", type=int, default=155)
+        parser.add_argument("--emb_dim_r", type=int, default=160)
         parser.add_argument("--readout_reg_scale", type=float, default=0.0076)
         parser.add_argument("--dropout", type=float, default=0.2544)
     else:

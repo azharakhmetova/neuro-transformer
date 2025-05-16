@@ -159,14 +159,14 @@ class CrossAttention(nn.Module):
         return outputs
 
 
-class NeuronTokenizer(nn.Module):
-    def __init__(self, num_neurons: int, emb_dim: int):
-        super(NeuronTokenizer, self).__init__()
-        self.embedding = nn.Embedding(num_neurons, emb_dim)
-        nn.init.constant_(self.embedding.weight, 1.0 / emb_dim)
+# class NeuronTokenizer(nn.Module):
+#     def __init__(self, num_neurons: int, emb_dim: int):
+#         super(NeuronTokenizer, self).__init__()
+#         self.embedding = nn.Embedding(num_neurons, emb_dim)
+#         nn.init.constant_(self.embedding.weight, 1.0 / emb_dim)
 
-    def forward(self, neuron_ids: torch.Tensor):
-        return self.embedding(neuron_ids)
+#     def forward(self, neuron_ids: torch.Tensor):
+#         return self.embedding(neuron_ids)
 
 
 @register("attention")
@@ -194,12 +194,12 @@ class AttentionReadout(Readout):
             args, input_shape=input_shape, output_shape=output_shape, ds=ds, name=name
         )
 
-        emb_dim = 160  # embedding dimension for readout
+        # emb_dim = 160  # embedding dimension for readout
 
         self.cross_attention = CrossAttention(
             input_shape=input_shape,
             num_neurons=self.num_neurons,
-            emb_dim=emb_dim,
+            emb_dim=args.emb_dim_r,
             num_heads=num_heads,
             dropout=dropout,
             use_lsa=use_lsa,
@@ -213,10 +213,28 @@ class AttentionReadout(Readout):
         )
 
         self.dropout = nn.Dropout(p=dropout)
-        self.neuron_tokenizer = NeuronTokenizer(num_neurons=self.num_neurons, emb_dim=emb_dim)
-        self.neuron_projection = nn.Linear(in_features=emb_dim, out_features=1, bias=True)
+        # self.neuron_tokenizer = NeuronTokenizer(num_neurons=self.num_neurons, emb_dim=emb_dim)
+        self.project_query_neurons = args.emb_dim_r != args.emb_dim_n_id
+        if self.project_query_neurons:
+            self.id_query_projection = nn.Linear(in_features=args.emb_dim_n_id, out_features=args.emb_dim_r, bias=False)
 
-    def forward(self, inputs: torch.Tensor, neuron_ids: torch.Tensor = None, shifts: torch.Tensor = None): 
+        self.neuron_projection = nn.Linear(in_features=args.emb_dim_r, out_features=1, bias=True)
+    
+    def feature_l1(self, reduction: str = "sum"):
+        l1 = self.neuron_projection.weight.abs()
+        l1 = l1.sum() if reduction == "sum" else l1.mean()
+
+        if self.neuron_projection.bias is not None:
+            bias = self.neuron_projection.bias.abs()
+            l1 += bias.sum() if reduction == "sum" else bias.mean()
+        
+        return l1
+
+    def regularizer(self, reduction: str = "sum"):
+        return self.reg_scale * self.feature_l1(reduction=reduction)
+
+
+    def forward(self, inputs: torch.Tensor, query_neurons: torch.Tensor = None, shifts: torch.Tensor = None): 
         # print("readout inputs shape: ", inputs.shape) # (B, num_tokens, num_channels)
         # print("readout self.input_shape: ", self.input_shape) # (num_tokens, num_channels)
         b, t, c = inputs.size()
@@ -226,37 +244,24 @@ class AttentionReadout(Readout):
             warnings.warn("Mismatch between expected and actual input shape.")
 
         # neuron_ids = torch.arange(self.num_neurons, device=inputs.device).unsqueeze(0).expand(b, -1)
-        if neuron_ids is None:
-            neuron_ids = torch.arange(self.num_neurons, device=inputs.device).unsqueeze(0).expand(b, -1)
-        else:
-            neuron_ids = neuron_ids.clone().to(inputs.device).unsqueeze(0).expand(b, -1)
+        # if neuron_ids is None:
+        #     neuron_ids = torch.arange(self.num_neurons, device=inputs.device).unsqueeze(0).expand(b, -1)
+        # else:
+        #     neuron_ids = neuron_ids.clone().to(inputs.device).unsqueeze(0).expand(b, -1)
 
-        neuron_queries = self.neuron_tokenizer(neuron_ids)
-        neuron_queries = self.dropout(neuron_queries)
+        # neuron_queries = self.neuron_tokenizer(neuron_ids)
+        if self.project_query_neurons:
+            query_neurons = self.id_query_projection(query_neurons)
+        query_neurons = self.dropout(query_neurons)
         #print("readout neuron_queries shape: ", neuron_queries.shape) # [B, N_neurons, emb_dim]
 
         # inputs = rearrange(inputs, 'b c h w -> b (h w) c')  # flatten spatial dims
 
-        outputs = self.cross_attention(q=neuron_queries, inputs=inputs)
+        outputs = self.cross_attention(q=query_neurons, inputs=inputs)
         outputs = self.dropout(outputs) # [B, N_neurons, emb_dim]
         # print("readout outputs shape: ", outputs.shape)
         outputs = self.neuron_projection(outputs).squeeze(-1)  # [B, N_neurons]
         # print("readout outputs after projection shape: ", outputs.shape)
         return outputs
 
-    def feature_l1(self, reduction: str = "sum"):
-        l1 = self.neuron_tokenizer.embedding.weight.abs()
-        return l1.sum() if reduction == "sum" else l1.mean()
-
-    def regularizer(self, reduction: str = "sum"):
-        reg_term = self.reg_scale * self.feature_l1(reduction=reduction)
-
-        l1 = self.neuron_projection.weight.abs()
-        l1 = l1.sum() if reduction == "sum" else l1.mean()
-
-        if self.neuron_projection.bias is not None:
-            bias = self.neuron_projection.bias.abs()
-            l1 += bias.sum() if reduction == "sum" else bias.mean()
-
-        reg_term += self.reg_scale * l1
-        return reg_term
+    
