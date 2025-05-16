@@ -232,7 +232,6 @@ def plot_samples(
             for micro_batch in data.micro_batching(batch, args.micro_batch_size):
                 with autocast(device_type=device.type, dtype=torch.float16):
                     images = micro_batch["image"]
-                    print("query_neuron_ids", micro_batch["query_neuron_ids"])
                     predictions, crop_images, image_grids = model(
                         inputs=images.to(device),
                         query_neuron_ids=micro_batch["query_neuron_ids"].to(device),
@@ -442,15 +441,15 @@ def compute_micro_batch_size(
             for _ in range(batch_iterations):
                 for mouse_id in mouse_ids:
                     batch_loss = 0.0
-                    if args.frac_input_neurons == 1.0:
-                        query_neuron_ids = torch.arange(args.output_shapes[mouse_id][0]).view(-1).to(device)
-                    else:                    
-                        query_neuron_ids = torch.arange(int(args.frac_input_neurons * args.output_shapes[mouse_id][0]), args.output_shapes[mouse_id][0]).view(-1).to(device)
+                    # if args.frac_input_neurons == 1.0:
+                    #     query_neuron_ids = torch.arange(args.output_shapes[mouse_id][0]).view(-1).to(device)
+                    # else:                    
+                        # query_neuron_ids = torch.arange(int(args.frac_input_neurons * args.output_shapes[mouse_id][0]), args.output_shapes[mouse_id][0]).view(-1).to(device)
                     for _ in range(micro_iterations):
                         outputs, _, _ = model(
                             inputs=random_input((micro_batch_size, *image_shape)),
                             # input_neuron_ids=torch.arange(int(args.frac_input_neurons * args.output_shapes[mouse_id][0])).view(-1).to(device),
-                            query_neuron_ids=query_neuron_ids,
+                            query_neuron_ids=torch.arange(int(args.frac_input_neurons * args.output_shapes[mouse_id][0]), args.output_shapes[mouse_id][0]).view(-1).to(device),
                             mouse_id=mouse_id,
                             behaviors=random_input((micro_batch_size, 3)),
                             pupil_centers=random_input((micro_batch_size, 2)),

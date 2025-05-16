@@ -149,5 +149,5 @@ wandb/
 
 
 # runs
+runs_debug/
 /runs_debug
-/runs_debug_new

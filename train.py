@@ -56,6 +56,7 @@ def train_step(
     for micro_batch in data.micro_batching(batch, micro_batch_size):
         with autocast(device_type=device.type, enabled=scaler.is_enabled(), dtype=torch.float16):
             y_true = micro_batch["response"].to(device)
+            y_true = y_true[:, micro_batch["query_neuron_ids"]]
             y_pred, _, _ = model(
                 inputs=micro_batch["image"].to(device),
                 query_neuron_ids=micro_batch["query_neuron_ids"].to(device),
@@ -134,6 +135,7 @@ def validation_step(
     for micro_batch in data.micro_batching(batch, micro_batch_size):
         with autocast(device_type=device.type, enabled=scaler.is_enabled(), dtype=torch.float16):
             y_true = micro_batch["response"].to(device)
+            y_true = y_true[:, micro_batch["query_neuron_ids"]]
             y_pred, _, _ = model(
                 inputs=micro_batch["image"].to(device),
                 query_neuron_ids=micro_batch["query_neuron_ids"].to(device),
@@ -539,7 +541,7 @@ if __name__ == "__main__":
 
     if temp_args.tokenize_neurons == 1:
         parser.add_argument("--emb_dim_tokenizer", type=int, default=150)
-        parser.add_argument("--frac_input_neurons", type=float, default=1.0)
+        parser.add_argument("--frac_input_neurons", type=float, default=0.0)
 
     # hyper-parameters for core module
     match temp_args.core:

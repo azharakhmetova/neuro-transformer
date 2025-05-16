@@ -198,9 +198,9 @@ def get_model(args, ds: t.Dict[str, DataLoader], summary: Summary = None) -> Mod
         "behaviors": random_input((batch_size, 3)),
         "pupil_centers": random_input((batch_size, 2)),
     }
-    if args.tokenize_neurons and args.frac_input_neurons == 1.0:
-        input_data["query_neuron_ids"] = torch.arange(N, dtype=torch.long, device="cpu")#.view(-1)
-    elif args.tokenize_neurons:
+    # if args.tokenize_neurons and args.frac_input_neurons == 0.0:
+    #     input_data["query_neuron_ids"] = torch.arange(N, dtype=torch.long, device="cpu")#.view(-1)
+    if args.tokenize_neurons:
         K = int(args.frac_input_neurons * N)
         # input_data["input_neuron_ids"] = torch.arange(K, dtype=torch.long, device="cpu")#.view(-1)
         input_data["query_neuron_ids"] = torch.arange(K, N, dtype=torch.long, device="cpu")#.view(-1)
