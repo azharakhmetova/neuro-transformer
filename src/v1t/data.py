@@ -443,6 +443,7 @@ class MiceDataset(Dataset):
         data["response"] = self.transform_response(data["response"])
         data["behavior"] = self.transform_behavior(data["behavior"])
         data["pupil_center"] = self.transform_pupil_center(data["pupil_center"])
+        data["neuron_coordinates"] = torch.from_numpy(self.coordinates)
         data["image_id"] = self.image_ids[idx]
         data["trial_id"] = self.trial_ids[idx]
         data["mouse_id"] = self.mouse_id
@@ -456,8 +457,9 @@ def collate_with_neuron_ids(batch, tokenize_neurons: bool = False, frac_input_ne
         perm = torch.randperm(N, device=batch["response"].device)
         batch["input_neuron_ids"] = perm[:K]
         batch["query_neuron_ids"] = perm[K:]
-        if K == N:
-            batch["query_neuron_ids"] = perm#torch.arange(N).to(batch["response"].device) 
+        # if K == N:
+        #     batch["input_neuron_ids"] = None
+        #     batch["query_neuron_ids"] = perm #torch.arange(N).to(batch["response"].device) 
     else:
         batch["input_neuron_ids"] = None
         batch["query_neuron_ids"] = None       

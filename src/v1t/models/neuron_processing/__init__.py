@@ -1,1 +1,2 @@
 from .tokenization import NeuronIDTokenizer
+from .tokenization import SimpleResponsesTokenizer

@@ -58,7 +58,9 @@ def train_step(
             y_true = micro_batch["response"].to(device)
             y_true = y_true[:, micro_batch["query_neuron_ids"]]
             y_pred, _, _ = model(
-                inputs=micro_batch["image"].to(device),
+                images=micro_batch["image"].to(device),
+                responses=micro_batch["response"].to(device),
+                input_neuron_ids=micro_batch["input_neuron_ids"].to(device),
                 query_neuron_ids=micro_batch["query_neuron_ids"].to(device),
                 mouse_id=mouse_id,
                 behaviors=micro_batch["behavior"].to(device),
@@ -137,7 +139,9 @@ def validation_step(
             y_true = micro_batch["response"].to(device)
             y_true = y_true[:, micro_batch["query_neuron_ids"]]
             y_pred, _, _ = model(
-                inputs=micro_batch["image"].to(device),
+                images=micro_batch["image"].to(device),
+                responses=micro_batch["response"].to(device),
+                input_neuron_ids=micro_batch["input_neuron_ids"].to(device),
                 query_neuron_ids=micro_batch["query_neuron_ids"].to(device),
                 mouse_id=mouse_id,
                 behaviors=micro_batch["behavior"].to(device),
@@ -217,7 +221,6 @@ def main(args, wandb_sweep: bool = False):
     summary = tensorboard.Summary(args)
 
     model = get_model(args, ds=train_ds, summary=summary)
-    print("test model")
     args.core_lr = args.lr if args.core_lr is None else args.core_lr
     optimizer = torch.optim.AdamW(
         params=model.get_parameters(core_lr=args.core_lr),
@@ -536,14 +539,18 @@ if __name__ == "__main__":
         "4 - shift_mode=3 and provide both behavior and pupil center to cropper",
     )
     parser.add_argument("--tokenize_neurons", action="store_true")
-    parser.add_argument("--emb_dim_image", type=int, default=150)
+    parser.add_argument("--emb_dim_image", type=int, default=156)
+    parser.add_argument("--1d_pe", action="store_true", help="use 1D positional embedding for image patches, otherwise 2D")
+    
 
     temp_args = parser.parse_known_args()[0]
 
     if temp_args.tokenize_neurons == 1:
-        parser.add_argument("--emb_dim_n_id", type=int, default=150)
+        parser.add_argument("--emb_dim_n_id", type=int, default=160)
         parser.add_argument("--emb_dim_n_response", type=int, default=150)
         parser.add_argument("--frac_input_neurons", type=float, default=0.0)
+        parser.add_argument("--num_samples_per_token", type=int, default=1)
+        parser.add_argument("--num_modes", type=int, default=2)
 
     # hyper-parameters for core module
     match temp_args.core:

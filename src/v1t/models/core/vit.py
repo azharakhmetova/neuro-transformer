@@ -90,7 +90,7 @@ class BehaviorMLP(nn.Module):
 class Attention(nn.Module):
     def __init__(
         self,
-        num_patches: int,
+        num_tokens: int,
         emb_dim: int,
         num_heads: int = 8,
         dropout: float = 0.0,
@@ -122,7 +122,7 @@ class Attention(nn.Module):
                 "scale",
                 param=nn.Parameter(torch.full(size=(num_heads,), fill_value=scale)),
             )
-            diagonal = torch.eye(num_patches, num_patches)
+            diagonal = torch.eye(num_tokens, num_tokens)
             self.register_buffer(
                 "mask",
                 torch.nonzero(diagonal == 1, as_tuple=False),
@@ -135,40 +135,40 @@ class Attention(nn.Module):
             self.mask = None
             self.register_buffer("scale", torch.tensor(scale))
 
-    def scaled_dot_product_attention(
-        self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor
-    ):
-        if self.mask is None:
-            dots = torch.matmul(q, k.transpose(-1, -2)) * self.scale
-        else:
-            scale = repeat(self.scale, "h -> b h 1 1", b=q.size(0))
-            dots = torch.matmul(q, k.transpose(-1, -2)) * scale
-            dots[:, :, self.mask[:, 0], self.mask[:, 1]] = -self.max_value
-        attn = self.attend(dots)
-        attn = self.dropout(attn)
-        outputs = einsum(attn, v, "b h n i, b h i d -> b h n d")
-        return outputs
-    # def scaled_dot_product_attention(self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor):
-    #     """ 
-    #     q: [B, H, N, D_head]
-    #     k, v: [B, H, S, D_head]
-    #     """
-    #     if q.device.type == "cuda": #and q.dtype in (torch.float16,torch.bfloat16):
-    #         with sdpa_kernel([SDPBackend.FLASH_ATTENTION]):
-    #             return F.scaled_dot_product_attention(
-    #                 q, k, v,
-    #                 attn_mask=self.mask,
-    #                 dropout_p=self.dropout.p,
-    #                 is_causal=False,
-    #             )
+    # def scaled_dot_product_attention(
+    #     self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor
+    # ):
+    #     if self.mask is None:
+    #         dots = torch.matmul(q, k.transpose(-1, -2)) * self.scale
     #     else:
-    #         print("Using standard attention in core")
-    #         return F.scaled_dot_product_attention(
-    #         q, k, v,
-    #         attn_mask=self.mask,
-    #         dropout_p=self.dropout.p,
-    #         is_causal=False,
-    #         )
+    #         scale = repeat(self.scale, "h -> b h 1 1", b=q.size(0))
+    #         dots = torch.matmul(q, k.transpose(-1, -2)) * scale
+    #         dots[:, :, self.mask[:, 0], self.mask[:, 1]] = -self.max_value
+    #     attn = self.attend(dots)
+    #     attn = self.dropout(attn)
+    #     outputs = einsum(attn, v, "b h n i, b h i d -> b h n d")
+    #     return outputs
+    def scaled_dot_product_attention(self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor):
+        """ 
+        q: [B, H, N, D_head]
+        k, v: [B, H, S, D_head]
+        """
+        if q.device.type == "cuda": #and q.dtype in (torch.float16,torch.bfloat16):
+            with sdpa_kernel([SDPBackend.FLASH_ATTENTION]):
+                return F.scaled_dot_product_attention(
+                    q, k, v,
+                    attn_mask=self.mask,
+                    dropout_p=self.dropout.p,
+                    is_causal=False,
+                )
+        else:
+            print("Using standard attention in core")
+            return F.scaled_dot_product_attention(
+            q, k, v,
+            attn_mask=self.mask,
+            dropout_p=self.dropout.p,
+            is_causal=False,
+            )
         
     def mha(self, inputs: torch.Tensor):
         inputs = self.layer_norm(inputs)
@@ -193,7 +193,7 @@ class Attention(nn.Module):
 class Transformer(nn.Module):
     def __init__(
         self,
-        input_shape: t.Tuple[int, int],
+        num_tokens: int,
         emb_dim: int,
         num_blocks: int,
         num_heads: int,
@@ -212,7 +212,7 @@ class Transformer(nn.Module):
             block = nn.ModuleDict(
                 {
                     "mha": Attention(
-                        num_patches=input_shape[0],
+                        num_tokens=num_tokens,
                         emb_dim=emb_dim,
                         num_heads=num_heads,
                         dropout=dropout,
@@ -237,7 +237,7 @@ class Transformer(nn.Module):
                 )
             self.blocks.append(block)
         self.drop_path = DropPath(dropout=drop_path)
-        self.output_shape = (input_shape[0], emb_dim) # (num_patches, emb_dim)
+        self.output_shape = (num_tokens, emb_dim) # (num_tokens, emb_dim)
         self.apply(self.init_weight)
 
     @staticmethod
@@ -264,7 +264,7 @@ class Transformer(nn.Module):
                 outputs = outputs + b_latent
             outputs = self.drop_path(block["mha"](outputs)) + outputs
             outputs = self.drop_path(block["mlp"](outputs)) + outputs
-        # outputs: (1, num_patches, emb_dim)
+        # outputs: (1, num_tokens, emb_dim)
         return outputs
 
 
@@ -273,12 +273,13 @@ class ViTCore(Core):
     def __init__(
         self,
         args,
-        input_shape: t.Tuple[int, int, int],
-        image_encoder_output_shape: t.Tuple[int, int],
-        image_encoder_num_patches: int,
+        # input_shape: t.Tuple[int, int, int],
+        # image_encoder_output_shape: t.Tuple[int, int],
+        num_image_patches: int,
+        num_neuron_tokens: int,
         name: str = "ViTCore",
     ):
-        super(ViTCore, self).__init__(args, input_shape=input_shape, name=name)
+        super(ViTCore, self).__init__(args, name=name)
         self.register_buffer("reg_scale", torch.tensor(args.core_reg_scale))
         self.behavior_mode = args.behavior_mode
 
@@ -300,7 +301,7 @@ class ViTCore(Core):
         #     dropout=args.p_dropout,
         # )
         self.transformer = Transformer(
-            input_shape=(image_encoder_output_shape[0], image_encoder_output_shape[1]),
+            num_tokens=num_image_patches+num_neuron_tokens,
             emb_dim=args.emb_dim_core,
             num_blocks=args.num_blocks,
             num_heads=args.num_heads,
@@ -313,18 +314,22 @@ class ViTCore(Core):
             use_bias=not args.disable_bias,
             grad_checkpointing=args.grad_checkpointing,
         )
-        self.image_encoder_num_patches = image_encoder_num_patches
+        self.num_image_patches = num_image_patches
         self.project_image = args.emb_dim_image != args.emb_dim_core
         if self.project_image:
             self.image_projection = nn.Linear(in_features=args.emb_dim_image, out_features=args.emb_dim_core, bias=False)
+        
+        self.project_neuron = args.emb_dim_n_response != args.emb_dim_core
+        if self.project_neuron:
+            self.neuron_projection = nn.Linear(args.emb_dim_n_response, args.emb_dim_core)
 
         # calculate latent height and width based on num_patches
         if self.readout == "gaussian2d":
-            h, w = self.find_shape(image_encoder_num_patches)
+            h, w = self.find_shape(num_image_patches)
             self.output_shape = (self.transformer.output_shape[-1], h, w)
             self.rearrange = Rearrange("b (h w) c -> b c h w", h=h, w=w)
         else:
-            self.output_shape = self.transformer.output_shape
+            self.output_shape = (num_image_patches, self.transformer.output_shape[-1]) #self.transformer.output_shape
 
     @staticmethod
     def find_shape(num_patches: int):
@@ -341,6 +346,7 @@ class ViTCore(Core):
     def forward(
         self,
         image_tokens: torch.Tensor,
+        neuron_tokens: t.Optional[torch.Tensor],
         mouse_id: str,
         behaviors: torch.Tensor,
         pupil_centers: torch.Tensor,
@@ -348,11 +354,18 @@ class ViTCore(Core):
         outputs = image_tokens
         if self.project_image:
             outputs = self.image_projection(outputs)
+        
+        if neuron_tokens is not None:
+            if self.project_neuron:
+                neuron_tokens = self.neuron_projection(neuron_tokens)
+            outputs = torch.cat((outputs, neuron_tokens), dim=1)
         if self.behavior_mode in (3, 4):
             behaviors = torch.cat((behaviors, pupil_centers), dim=-1)
         outputs = self.transformer(outputs, mouse_id=mouse_id, behaviors=behaviors)
+        outputs = outputs[:, :self.num_image_patches, :] 
         # outputs = outputs[:, 1:, :]  # remove CLS token
         if self.readout == "gaussian2d":
+            # outputs = outputs[:, :self.image_encoder_num_patches, :] 
             outputs = self.rearrange(outputs)
         # print("core outputs shape", outputs.shape)
         return outputs

@@ -263,9 +263,9 @@ class Summary(object):
             image = results["images"][i]
             crop_image = results["crop_images"][i]
             image_grid = image_grids[i]
-            target = results["targets"][i]
+            target = results["targets"][i][:num_neurons]
             print("target", target.shape)
-            prediction = results["predictions"][i]
+            prediction = results["predictions"][i][:num_neurons]
             pupil_center = results["pupil_center"][i]
             behavior = results["behaviors"][i]
             axes[0].scatter(

@@ -18,10 +18,10 @@ def register(name):
 
 class Core(nn.Module):
     def __init__(
-        self, args: t.Any, input_shape: t.Tuple[int, int, int], name: str = "Core"
+        self, args: t.Any, name: str = "Core" #input_shape: t.Tuple[int, int, int]
     ):
         super(Core, self).__init__()
-        self.input_shape = input_shape
+        # self.input_shape = input_shape
         self.name = name
         self.behavior_mode = args.behavior_mode
         if args.core != "vit":

@@ -88,42 +88,42 @@ class CrossAttention(nn.Module):
         if scale:
             self.register_buffer("scale_readout", torch.tensor(self.scale))
 
-    def scaled_dot_product_attention(self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor):
-        dots = torch.matmul(q, k.transpose(-1, -2)) * self.scale
-        attn = self.attend(dots)
-        attn = self.dropout(attn)
-        outputs = einsum(attn, v, "b h n i, b h i d -> b h n d")
-        return outputs
-    
     # def scaled_dot_product_attention(self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor):
-    #     """ 
-    #     q: [B, H, N, D_head]
-    #     k, v: [B, H, S, D_head]
-    #     """
-    #     if q.device.type == "cuda":
-    #         # Dispatch through FlashAttention (or fall back) via PyTorch’s 
-    #         # print("Using FlashAttention")
-    #         with sdpa_kernel([SDPBackend.FLASH_ATTENTION]):
-    #             out = F.scaled_dot_product_attention(
-    #                 q, k, v,
-    #                 attn_mask=None,
-    #                 dropout_p=self.dropout.p,
-    #                 is_causal=False
-    #             )
-    #     else:
-    #         print("Using standard attention")
-    #         out = F.scaled_dot_product_attention(
-    #             q, k, v,
-    #             attn_mask=None,
-    #             dropout_p=self.dropout.p,
-    #             is_causal=False
-    #         )            
-    #     # out shape is [B, H, N, D_head]
-    #     return out
+    #     dots = torch.matmul(q, k.transpose(-1, -2)) * self.scale
+    #     attn = self.attend(dots)
+    #     attn = self.dropout(attn)
+    #     outputs = einsum(attn, v, "b h n i, b h i d -> b h n d")
+    #     return outputs
+    
+    def scaled_dot_product_attention(self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor):
+        """ 
+        q: [B, H, N, D_head]
+        k, v: [B, H, S, D_head]
+        """
+        if q.device.type == "cuda":
+            # Dispatch through FlashAttention (or fall back) via PyTorch’s 
+            # print("Using FlashAttention")
+            with sdpa_kernel([SDPBackend.FLASH_ATTENTION]):
+                out = F.scaled_dot_product_attention(
+                    q, k, v,
+                    attn_mask=None,
+                    dropout_p=self.dropout.p,
+                    is_causal=False
+                )
+        else:
+            print("Using standard attention")
+            out = F.scaled_dot_product_attention(
+                q, k, v,
+                attn_mask=None,
+                dropout_p=self.dropout.p,
+                is_causal=False
+            )            
+        # out shape is [B, H, N, D_head]
+        return out
 
     def mha(self, q: torch.Tensor, inputs: torch.Tensor):
-        q = self.layer_norm(q)
-        inputs = self.layer_norm_inputs(inputs)
+        q = self.layer_norm(q) # [B, N_query_neurons, emb_dim]
+        inputs = self.layer_norm_inputs(inputs) # [B, num_image_tokens, num_channels]
 
         if self.use_pos_embedding:
             inputs_pos = inputs + self.positional_embedding
@@ -134,7 +134,7 @@ class CrossAttention(nn.Module):
 
         # Compute keys and values depending on configuration
         if self.key_embedding and self.value_embedding:
-            key, value = self.to_kv(rearrange(inputs, "b s c -> (b s) c")).chunk(2, dim=-1)
+            key, value = self.to_kv(rearrange(inputs_pos, "b s c -> (b s) c")).chunk(2, dim=-1)
             k = rearrange(key, "(b s) (h d) -> b h s d", h=self.heads, b=b)
             v = rearrange(value, "(b s) (h d) -> b h s d", h=self.heads, b=b)
         elif self.key_embedding:
@@ -235,10 +235,10 @@ class AttentionReadout(Readout):
 
 
     def forward(self, inputs: torch.Tensor, query_neurons: torch.Tensor = None, shifts: torch.Tensor = None): 
-        # print("readout inputs shape: ", inputs.shape) # (B, num_tokens, num_channels)
-        # print("readout self.input_shape: ", self.input_shape) # (num_tokens, num_channels)
         b, t, c = inputs.size()
+        # print("readout inputs shape: ", inputs.shape) # (B, num_tokens, num_channels)
         t_in, c_in = self.input_shape
+        # print("readout self.input_shape: ", inputs.shape) # (B, num_tokens, num_channels)
 
         if (c_in, t_in) != (c, t):
             warnings.warn("Mismatch between expected and actual input shape.")
@@ -253,7 +253,7 @@ class AttentionReadout(Readout):
         if self.project_query_neurons:
             query_neurons = self.id_query_projection(query_neurons)
         query_neurons = self.dropout(query_neurons)
-        #print("readout neuron_queries shape: ", neuron_queries.shape) # [B, N_neurons, emb_dim]
+        # print("readout neuron_queries shape: ", query_neurons.shape) # [B, N_neurons, emb_dim]
 
         # inputs = rearrange(inputs, 'b c h w -> b (h w) c')  # flatten spatial dims
 

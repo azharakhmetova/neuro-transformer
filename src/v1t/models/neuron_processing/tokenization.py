@@ -27,3 +27,83 @@ class NeuronIDTokenizer(nn.Module):
 
     def forward(self, neuron_ids: torch.Tensor):
         return self.embedding(neuron_ids)
+    
+
+class SimpleResponsesTokenizer(nn.Module):
+    # todo 
+    # - do we want neuron id tokens independent of the responses?
+    # - masking?
+    # - add back embedding per latent state:
+    # self.session_tokenizer = nn.Embedding(len(num_neurons), token_dim, device=device)
+    # self.sessions_enc = {}
+    # for i, s in enumerate(num_neurons.keys()):
+    #     self.sessions_enc[s] = torch.Tensor([i]).long().to(device)
+
+    def __init__(
+        self, 
+        args,
+        num_neurons: int,
+        num_samples_per_neuron: int,
+        num_samples_per_token: int, 
+        frac_input_neurons: float,
+        emb_dim: int, 
+        device: torch.device,
+        use_masking: bool = False,
+    ):
+        super().__init__()
+        self.use_masking = use_masking
+        self.device = device
+        self.num_input_neurons = int(frac_input_neurons * num_neurons)
+        self.samples_per_token = num_samples_per_token
+        self.tokenizer = nn.Linear(num_samples_per_token, emb_dim)
+        # add session tokenizer? self.session_tokenizer = nn.Embedding(len(num_neurons), token_dim, device=device)
+        self.T = self.num_tokens_per_neuron(num_samples_per_neuron)
+        self.num_input_tokens = self.num_input_neurons * self.T
+        self.output_shape = (self.num_input_tokens, emb_dim) 
+
+        self.project_neuron_id = emb_dim != args.emb_dim_n_id
+        if self.project_neuron_id:
+            self.neuron_id_token_projection = nn.Linear(args.emb_dim_n_id, emb_dim)
+
+    def num_tokens_per_neuron(self, num_samples_per_neuron):
+        return num_samples_per_neuron // self.samples_per_token
+
+    def forward(
+            self, 
+            responses: torch.Tensor, 
+            neuron_id_tokens: torch.Tensor=None,
+            mask: torch.Tensor=None, 
+            mask_token=None
+    ):
+        # todo - this needs validation
+        (B, N, S) = responses.shape
+        # print("S", S)
+        # print("Input device:", responses.device)
+        # responses = responses.to(input_neuron_ids.device)
+        # print('input neuron id device', input_neuron_ids.device)
+        # print("T", self.T)
+        # print("responses shape (B, N, S)", responses.shape)
+        # responses_subset = responses[:, input_neuron_ids, :] #.float().to(input_neuron_ids.device) # select only the neurons we are interested in
+        # print("responses subset shape (B, N, S)", responses_subset.shape)
+        # print("Tokenizer weight device:", self.tokenizer.weight.device)
+
+        tok = self.tokenizer(
+                responses.view(B, self.num_input_neurons, self.T, self.samples_per_token)
+            ) # (B, N, T, samples_per_T) -> (B, N, T, emb_dim_n_response)
+        # tok += self.pos_embedding(tok)
+        # print("neuron tokens shape (B, N, N, emb)", tok.shape)
+        if self.use_masking:
+            tok = torch.where(mask.view(B, self.num_input_neurons, self.T, 1), tok, mask_token)
+
+        if self.project_neuron_id:
+            neuron_id_tok = self.neuron_id_token_projection(neuron_id_tokens) # (N, emb_dim_n_response)
+            # print("neuron id tokens shape (B, N, emb)", neuron_id_tok.shape)
+        else:
+            neuron_id_tok = neuron_id_tokens 
+        
+        # (N, emb_dim_n_response) -> (B, N, T, emb_dim_n_response)
+        tok = tok + neuron_id_tok.unsqueeze(0).unsqueeze(2).repeat(B, 1, self.T, 1) #+ self.session_tokenizer(self.sessions_enc[session]) 
+        
+        tok = tok.view(tok.shape[0], -1, tok.shape[-1]) # (B, N, T, emb_dim_n_response) -> (B, N*T, emb_dim_n_response)
+        # print("final token shape (B, N, emb)", tok.shape)
+        return tok

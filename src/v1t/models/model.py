@@ -11,6 +11,7 @@ from torch.utils.data import DataLoader
 from v1t.models.core import get_core
 from v1t.models.readout import Readouts
 from v1t.models.neuron_processing import NeuronIDTokenizer
+from v1t.models.neuron_processing import SimpleResponsesTokenizer 
 from v1t.models.image_processing import Image2Patches
 from v1t.utils.tensorboard import Summary
 from v1t.models.core_shifter import CoreShifters
@@ -70,6 +71,7 @@ class Model(nn.Module):
         self.shift_mode = args.shift_mode
         self.readout_type = args.readout
         self.tokenize_neurons = args.tokenize_neurons
+        self.frac_input_neurons = args.frac_input_neurons
         if self.tokenize_neurons == 1:
             self.neuron_id_tokenizer = NeuronIDTokenizer(num_neurons=list(self.output_shapes.items())[0][1][0], emb_dim=args.emb_dim_n_id)#, device=args.device)
 
@@ -85,14 +87,31 @@ class Model(nn.Module):
             emb_dim=args.emb_dim_image,
             dropout=args.p_dropout,
         )
+        self.input_neuron_embedding = SimpleResponsesTokenizer(
+            args,
+            num_neurons=list(self.output_shapes.items())[0][1][0],
+            num_samples_per_neuron=1,
+            frac_input_neurons=args.frac_input_neurons,
+            num_samples_per_token=args.num_samples_per_token,
+            emb_dim=args.emb_dim_n_response,
+            device=args.device,
+            use_masking=None,
+        )
+        # self.neuron_pe = PositionalEncoding(
+        #     d_model=args.emb_dim,
+        #     max_len=list(self.output_shapes.items())[0][1][0],
+        #     mode="1d",
+        #     )
+        # self.neuron_coord_pe = nn.Linear(3, args.emb_dim, bias=True)
 
         self.add_module(
             name="core",
             module=get_core(args)(
                 args,
-                input_shape=self.image_cropper.output_shape,
-                image_encoder_output_shape=self.patch_embedding.output_shape,
-                image_encoder_num_patches=self.patch_embedding.num_patches,
+                # input_shape=self.image_cropper.output_shape,
+                # image_encoder_output_shape=self.patch_embedding.output_shape,
+                num_image_patches=self.patch_embedding.num_patches,
+                num_neuron_tokens=self.input_neuron_embedding.num_input_tokens,
             ),
         )
         if self.shift_mode in (2, 3, 4):
@@ -136,6 +155,13 @@ class Model(nn.Module):
                     "name": "neuron_id_tokenizer",
                 }
             )
+    
+        params.append(
+            {
+                "params": self.input_neuron_embedding.parameters(),
+                "name": "input_neuron_embedding",
+            }
+        )
         
         params.append(
             {
@@ -187,15 +213,18 @@ class Model(nn.Module):
 
     def forward(
         self,
-        inputs: torch.Tensor,
+        images: torch.Tensor,
         mouse_id: str,
         behaviors: torch.Tensor,
         pupil_centers: torch.Tensor,
+        responses: torch.Tensor = None,
+        input_neuron_ids: torch.Tensor = None,
         query_neuron_ids: torch.Tensor = None,
+         # neuron_coords: torch.Tensor = None,
         activate: bool = True,
     ):
         images, image_grids = self.image_cropper(
-            inputs,
+            images,
             mouse_id=mouse_id,
             behaviors=behaviors,
             pupil_centers=pupil_centers,
@@ -206,8 +235,20 @@ class Model(nn.Module):
         # else:
         image_tokens = self.patch_embedding(images) 
 
+        if self.frac_input_neurons > 0:
+            if responses.dim() != 3:
+                responses = responses.unsqueeze(-1)
+            input_neuron_id_tokens = self.neuron_id_tokenizer(input_neuron_ids.to(torch.long))
+            input_neuron_tokens = self.input_neuron_embedding(
+                responses=responses[:, input_neuron_ids, :],
+                neuron_id_tokens=input_neuron_id_tokens,
+            )
+        else:
+            input_neuron_tokens = None
+
         outputs = self.core(    # (B, num_tokens, num_channels)
             image_tokens=image_tokens,
+            neuron_tokens=input_neuron_tokens,
             mouse_id=mouse_id,
             behaviors=behaviors,
             pupil_centers=pupil_centers,
@@ -240,18 +281,20 @@ def get_model(args, ds: t.Dict[str, DataLoader], summary: Summary = None) -> Mod
     N = list(model.output_shapes.items())[0][1][0]
     print("N neurons", N)
     input_data={
-        "inputs": random_input((batch_size, *model.input_shape)),
+        "images": random_input((batch_size, *model.input_shape)),
+        "responses": random_input((batch_size, N, 1)),
         "behaviors": random_input((batch_size, 3)),
         "pupil_centers": random_input((batch_size, 2)),
+        # "neuron_coords": random_input((batch_size, N, 3)),
     }
     # if args.tokenize_neurons and args.frac_input_neurons == 0.0:
     #     input_data["query_neuron_ids"] = torch.arange(N, dtype=torch.long, device="cpu")#.view(-1)
     if args.tokenize_neurons:
         K = int(args.frac_input_neurons * N)
-        # input_data["input_neuron_ids"] = torch.arange(K, dtype=torch.long, device="cpu")#.view(-1)
+        input_data["input_neuron_ids"] = torch.arange(K, dtype=torch.long, device="cpu")#.view(-1)
         input_data["query_neuron_ids"] = torch.arange(K, N, dtype=torch.long, device="cpu")#.view(-1)
     else:
-        # input_data["input_neuron_ids"] = None
+        input_data["input_neuron_ids"] = None
         input_data["query_neuron_ids"] = None
     model_info = get_model_info(
         model=model,
@@ -269,6 +312,7 @@ def get_model(args, ds: t.Dict[str, DataLoader], summary: Summary = None) -> Mod
         model=model.core,
         input_data={
             "image_tokens": random_input((batch_size, *model.patch_embedding.output_shape)),
+            "neuron_tokens": random_input((batch_size, *model.input_neuron_embedding.output_shape)),
             "behaviors": random_input((batch_size, 3)),
             "pupil_centers": random_input((batch_size, 2)),
         },
