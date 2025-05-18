@@ -60,6 +60,7 @@ def train_step(
             y_pred, _, _ = model(
                 images=micro_batch["image"].to(device),
                 responses=micro_batch["response"].to(device),
+                neuron_coords=micro_batch["neuron_coordinates"].to(device),
                 input_neuron_ids=micro_batch["input_neuron_ids"].to(device),
                 query_neuron_ids=micro_batch["query_neuron_ids"].to(device),
                 mouse_id=mouse_id,
@@ -141,6 +142,7 @@ def validation_step(
             y_pred, _, _ = model(
                 images=micro_batch["image"].to(device),
                 responses=micro_batch["response"].to(device),
+                neuron_coords=micro_batch["neuron_coordinates"].to(device),
                 input_neuron_ids=micro_batch["input_neuron_ids"].to(device),
                 query_neuron_ids=micro_batch["query_neuron_ids"].to(device),
                 mouse_id=mouse_id,
@@ -540,7 +542,9 @@ if __name__ == "__main__":
     )
     parser.add_argument("--tokenize_neurons", action="store_true")
     parser.add_argument("--emb_dim_image", type=int, default=156)
-    parser.add_argument("--1d_pe", action="store_true", help="use 1D positional embedding for image patches, otherwise 2D")
+    parser.add_argument("--1d_pe_before_core", action="store_true", help="use 1D positional embedding for image patches, otherwise 2D")
+    parser.add_argument("--1d_pe_after_core", action="store_true", help="use 1D positional embedding for image patches, otherwise 2D")
+
     
 
     temp_args = parser.parse_known_args()[0]
@@ -551,6 +555,7 @@ if __name__ == "__main__":
         parser.add_argument("--frac_input_neurons", type=float, default=0.0)
         parser.add_argument("--num_samples_per_token", type=int, default=1)
         parser.add_argument("--num_modes", type=int, default=2)
+        parser.add_argument("--use_neuron_coord_pe", action="store_true")
 
     # hyper-parameters for core module
     match temp_args.core:

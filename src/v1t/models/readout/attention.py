@@ -33,11 +33,13 @@ class CrossAttention(nn.Module):
         value_embedding: bool = False,
         use_layer_norm: bool = False,
         use_pos_embedding: bool = True,
+        use_flash_a: bool = False,
         temperature: tuple = (False, 1.0)
     ):
         super(CrossAttention, self).__init__()
 
         self.grad_checkpointing = grad_checkpointing
+        self.use_flash_a = use_flash_a
         self.use_pos_embedding = use_pos_embedding
         self.key_embedding = key_embedding
         self.value_embedding = value_embedding
@@ -100,7 +102,7 @@ class CrossAttention(nn.Module):
         q: [B, H, N, D_head]
         k, v: [B, H, S, D_head]
         """
-        if q.device.type == "cuda":
+        if q.device.type == "cuda" and self.use_flash_a:
             # Dispatch through FlashAttention (or fall back) via PyTorch’s 
             # print("Using FlashAttention")
             with sdpa_kernel([SDPBackend.FLASH_ATTENTION]):
@@ -111,7 +113,7 @@ class CrossAttention(nn.Module):
                     is_causal=False
                 )
         else:
-            print("Using standard attention")
+            # print("Using standard attention")
             out = F.scaled_dot_product_attention(
                 q, k, v,
                 attn_mask=None,
@@ -209,7 +211,8 @@ class AttentionReadout(Readout):
             value_embedding=value_embedding,
             scale=scale,
             temperature=temperature,
-            use_pos_embedding=use_pos_embedding
+            use_pos_embedding=use_pos_embedding,
+            use_flash_a=args.amp,
         )
 
         self.dropout = nn.Dropout(p=dropout)
@@ -219,6 +222,7 @@ class AttentionReadout(Readout):
             self.id_query_projection = nn.Linear(in_features=args.emb_dim_n_id, out_features=args.emb_dim_r, bias=False)
 
         self.neuron_projection = nn.Linear(in_features=args.emb_dim_r, out_features=1, bias=True)
+        # nn.init.constant_(self.neuron_projection.weight, 1.0/args.emb_dim_r)
     
     def feature_l1(self, reduction: str = "sum"):
         l1 = self.neuron_projection.weight.abs()

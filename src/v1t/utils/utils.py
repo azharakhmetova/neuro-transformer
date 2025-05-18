@@ -87,6 +87,7 @@ def inference(
             predictions, _, _ = model(
                 images=micro_batch["image"].to(device),
                 responses=micro_batch["response"].to(device),
+                neuron_coords=micro_batch["neuron_coordinates"].to(device),
                 input_neuron_ids=micro_batch["input_neuron_ids"].to(device),
                 query_neuron_ids=micro_batch["query_neuron_ids"].to(device),
                 mouse_id=mouse_id,
@@ -237,6 +238,7 @@ def plot_samples(
                     predictions, crop_images, image_grids = model(
                         images=images.to(device),
                         responses=micro_batch["response"].to(device),
+                        neuron_coords=micro_batch["neuron_coordinates"].to(device),
                         input_neuron_ids=micro_batch["input_neuron_ids"].to(device),
                         query_neuron_ids=micro_batch["query_neuron_ids"].to(device),
                         mouse_id=mouse_id,
@@ -453,6 +455,7 @@ def compute_micro_batch_size(
                         outputs, _, _ = model(
                             images=random_input((micro_batch_size, *image_shape)),
                             responses=random_input((micro_batch_size, list(model.output_shapes.items())[0][1][0])),
+                            neuron_coords=random_input((micro_batch_size, list(model.output_shapes.items())[0][1][0], 3)),
                             input_neuron_ids=torch.arange(int(args.frac_input_neurons * args.output_shapes[mouse_id][0])).view(-1).to(device),
                             query_neuron_ids=torch.arange(int(args.frac_input_neurons * args.output_shapes[mouse_id][0]), args.output_shapes[mouse_id][0]).view(-1).to(device),
                             mouse_id=mouse_id,

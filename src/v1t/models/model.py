@@ -70,10 +70,13 @@ class Model(nn.Module):
         self.output_shapes = args.output_shapes
         self.shift_mode = args.shift_mode
         self.readout_type = args.readout
+        self.use_neuron_coord_pe = args.use_neuron_coord_pe
         self.tokenize_neurons = args.tokenize_neurons
         self.frac_input_neurons = args.frac_input_neurons
         if self.tokenize_neurons == 1:
             self.neuron_id_tokenizer = NeuronIDTokenizer(num_neurons=list(self.output_shapes.items())[0][1][0], emb_dim=args.emb_dim_n_id)#, device=args.device)
+            self.mode_embedding = nn.Embedding(args.num_modes, args.emb_dim_core)
+            # nn.init.constant_(self.mode_embedding.weight, 1.0 / args.emb_dim_core)
 
         self.add_module(
             "image_cropper",
@@ -102,7 +105,7 @@ class Model(nn.Module):
         #     max_len=list(self.output_shapes.items())[0][1][0],
         #     mode="1d",
         #     )
-        # self.neuron_coord_pe = nn.Linear(3, args.emb_dim, bias=True)
+        self.neuron_coord_pe = nn.Linear(3, args.emb_dim_n_response, bias=False)
 
         self.add_module(
             name="core",
@@ -159,7 +162,14 @@ class Model(nn.Module):
         params.append(
             {
                 "params": self.input_neuron_embedding.parameters(),
-                "name": "input_neuron_embedding",
+                "name": "input_neuron_embeddings",
+            }
+        )
+
+        params.append(
+            {
+                "params": self.neuron_coord_pe.parameters(),
+                "name": "input_neuron_positional_embeddings",
             }
         )
         
@@ -220,7 +230,7 @@ class Model(nn.Module):
         responses: torch.Tensor = None,
         input_neuron_ids: torch.Tensor = None,
         query_neuron_ids: torch.Tensor = None,
-         # neuron_coords: torch.Tensor = None,
+        neuron_coords: torch.Tensor = None,
         activate: bool = True,
     ):
         images, image_grids = self.image_cropper(
@@ -243,6 +253,9 @@ class Model(nn.Module):
                 responses=responses[:, input_neuron_ids, :],
                 neuron_id_tokens=input_neuron_id_tokens,
             )
+            if self.use_neuron_coord_pe:
+                input_coords = neuron_coords[:, input_neuron_ids, :]    # (B, K, 3)
+                input_neuron_tokens += self.neuron_coord_pe(input_coords) #[:, input_neuron_ids.to(torch.long), :]
         else:
             input_neuron_tokens = None
 
@@ -283,6 +296,7 @@ def get_model(args, ds: t.Dict[str, DataLoader], summary: Summary = None) -> Mod
     input_data={
         "images": random_input((batch_size, *model.input_shape)),
         "responses": random_input((batch_size, N, 1)),
+        "neuron_coords": random_input((batch_size, N, 3)),
         "behaviors": random_input((batch_size, 3)),
         "pupil_centers": random_input((batch_size, 2)),
         # "neuron_coords": random_input((batch_size, N, 3)),
