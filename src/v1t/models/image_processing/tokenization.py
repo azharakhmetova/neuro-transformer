@@ -6,6 +6,8 @@ from torch import nn
 import torch.nn.functional as F
 from einops.layers.torch import Rearrange
 
+from v1t.models.layers.embeddings import PositionalEncoding
+
 
 
 
@@ -52,11 +54,13 @@ class Image2Patches(nn.Module):
         stride: int,
         emb_dim: int,
         dropout: float = 0.0,
+        pe_mode: str = "1d",
     ):
         super(Image2Patches, self).__init__()
         assert 1 <= stride <= patch_size
         c, h, w = image_shape
         self.input_shape = image_shape
+        self.pe_mode = pe_mode
 
         num_patches = self.unfold_dim(h, w, patch_size=patch_size, stride=stride)
         match patch_mode:
@@ -99,13 +103,40 @@ class Image2Patches(nn.Module):
                 raise NotImplementedError(f"--patch_mode {patch_mode} not implemented.")
         # self.cls_token = nn.Parameter(torch.randn(1, 1, emb_dim))
         # num_patches += 1
-        self.pos_embedding = nn.Parameter(torch.randn(num_patches, emb_dim))
+        if pe_mode == "1d":
+            self.pos_embedding = PositionalEncoding(
+                d_model=emb_dim,
+                dropout=dropout,
+                max_len=num_patches,
+                learned=False,
+                mode=pe_mode,
+                ) #nn.Parameter(torch.randn(num_patches, emb_dim))
+        elif pe_mode == "2d":
+            height, width = self.find_shape(num_patches)
+            self.height = height
+            self.width = width
+            self.pos_embedding = PositionalEncoding(
+                d_model=emb_dim,
+                dropout=dropout,
+                height=height,
+                width=width,
+                learned=False,
+                mode=pe_mode,
+                )
         self.dropout = nn.Dropout(p=dropout)
         self.num_patches = num_patches
         self.output_shape = (num_patches, emb_dim)
 
         self.apply(self.init_weight)
 
+    @staticmethod
+    def find_shape(num_patches: int):
+        dim1 = math.ceil(math.sqrt(num_patches))
+        while num_patches % dim1 != 0 and dim1 > 0:
+            dim1 -= 1
+        dim2 = num_patches // dim1
+        return dim1, dim2
+    
     @staticmethod
     def unfold_dim(h: int, w: int, patch_size: int, padding: int = 0, stride: int = 1):
         l = lambda s: math.floor(((s + 2 * padding - patch_size) / stride) + 1)
@@ -117,10 +148,15 @@ class Image2Patches(nn.Module):
             nn.init.kaiming_normal_(m.weight)
 
     def forward(self, inputs: torch.Tensor):
-        # batch_size = inputs.size(0)
+        batch_size = inputs.size(0)
         patches = self.projection(inputs)
         # cls_tokens = repeat(self.cls_token, "1 1 d -> b 1 d", b=batch_size)
         # outputs = torch.cat((cls_tokens, patches), dim=1)
-        outputs = patches + self.pos_embedding
+        if self.pe_mode == "1d":
+            outputs = patches + self.pos_embedding(outputs)
+        elif self.pe_mode == "2d":
+            patches = patches.reshape(batch_size, self.height, self.width, -1)
+            # print("outputs shape before pos_embedding", outputs.shape)
+            outputs = (patches + self.pos_embedding(patches)).reshape(batch_size, self.num_patches, -1)
         outputs = self.dropout(outputs)
         return outputs

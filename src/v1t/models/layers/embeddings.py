@@ -114,9 +114,9 @@ class PositionalEncoding(nn.Module):
                 raise RuntimeError("Module configured without 1D mode but got 3D input")
             L = x.size(1)
             x = x + self.pe1[:, :L, :]
-        elif x.dim() == 4 and self.mode == '1d':
-            L = x.size(2)
-            x = x + self.pe1[:, :L, :].unsqueeze(0)
+        # elif x.dim() == 4 and self.mode == '1d':
+        #     L = x.size(2)
+        #     x = x + self.pe1[:, :L, :].unsqueeze(0)
         elif x.dim() == 4:
             if self.mode not in ('2d', 'both'):
                 raise RuntimeError("Module configured without 2D mode but got 4D input")

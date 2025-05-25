@@ -543,8 +543,27 @@ if __name__ == "__main__":
     )
     parser.add_argument("--tokenize_neurons", action="store_true")
     parser.add_argument("--emb_dim_image", type=int, default=156)
-    parser.add_argument("--1d_pe_before_core", action="store_true", help="use 1D positional embedding for image patches, otherwise 2D")
-    parser.add_argument("--1d_pe_after_core", action="store_true", help="use 1D positional embedding for image patches, otherwise 2D")
+    parser.add_argument(
+        "--pe_before_SA", 
+        type=str, 
+        default="2d", 
+        choices=["1d", "2d", "none"], 
+    )
+    parser.add_argument("--learn_pe_before_SA", action="store_true")
+    parser.add_argument(
+        "--pe_before_core",
+        type=str, 
+        default="2d", 
+        choices=["1d", "2d", "none"], 
+    )
+    parser.add_argument("--learn_pe_before_core", action="store_true")
+    parser.add_argument(
+        "--pe_after_core",         
+        type=str, 
+        default="2d", 
+        choices=["1d", "2d", "none"], 
+    )
+    parser.add_argument("--learn_pe_after_core", action="store_true")
 
     
 

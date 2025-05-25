@@ -70,6 +70,7 @@ class Model(nn.Module):
         self.output_shapes = args.output_shapes
         self.shift_mode = args.shift_mode
         self.readout_type = args.readout
+        self.pe_after_core = args.pe_after_core
         self.use_neuron_coord_pe = args.use_neuron_coord_pe
         self.tokenize_neurons = args.tokenize_neurons
         self.frac_input_neurons = args.frac_input_neurons
@@ -89,6 +90,7 @@ class Model(nn.Module):
             stride=args.patch_stride,
             emb_dim=args.emb_dim_image,
             dropout=args.p_dropout,
+            pe_mode=args.pe_before_core,
         )
         self.input_neuron_embedding = SimpleResponsesTokenizer(
             args,
@@ -112,7 +114,6 @@ class Model(nn.Module):
             module=get_core(args)(
                 args,
                 # input_shape=self.image_cropper.output_shape,
-                # image_encoder_output_shape=self.patch_embedding.output_shape,
                 num_image_patches=self.patch_embedding.num_patches,
                 num_neuron_tokens=self.input_neuron_embedding.num_input_tokens,
             ),
@@ -190,7 +191,12 @@ class Model(nn.Module):
                     "name": "core",
                 }
             )
-        params.append({"params": self.readouts.parameters(), "name": "readouts"})
+        params.append(
+                {
+                    "params": self.readouts.parameters(), 
+                    "name": "readouts"
+                }
+            )
         if self.image_cropper.image_shifter is not None:
             params.append(
                 {
@@ -271,6 +277,11 @@ class Model(nn.Module):
             behaviors=behaviors,
             pupil_centers=pupil_centers,
         )
+        # add positional encoding after the core
+        if self.pe_after_core == "2d":
+            temp = outputs.reshape(outputs.shape[0], self.patch_embedding.height, self.patch_embedding.width, outputs.shape[-1])  # (B, h, w, num_channels)
+            temp += self.patch_embedding.pos_embedding(temp)
+            outputs = temp.reshape(outputs.shape[0], -1, outputs.shape[-1])  # (B, num_tokens, num_channels)
         # print("model core output shape: ", outputs.shape)
         shifts = None
         if self.core_shifter is not None:
