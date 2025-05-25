@@ -125,6 +125,8 @@ class CrossAttention(nn.Module):
 
     def mha(self, q: torch.Tensor, inputs: torch.Tensor):
         q = self.layer_norm(q) # [B, N_query_neurons, emb_dim]
+        # print("crossAttention query shape: ", q.shape) # [B, N_query_neurons, emb_dim]
+        # print("CrossAttention inputs shape: ", inputs.shape) # [B, num_image_tokens, num_channels]
         inputs = self.layer_norm_inputs(inputs) # [B, num_image_tokens, num_channels]
 
         if self.use_pos_embedding:
@@ -241,6 +243,7 @@ class AttentionReadout(Readout):
     def forward(self, inputs: torch.Tensor, query_neurons: torch.Tensor = None, shifts: torch.Tensor = None): 
         b, t, c = inputs.size()
         # print("readout inputs shape: ", inputs.shape) # (B, num_tokens, num_channels)
+        # print("readout query_neurons shape: ", query_neurons.shape)
         t_in, c_in = self.input_shape
         # print("readout self.input_shape: ", inputs.shape) # (B, num_tokens, num_channels)
 

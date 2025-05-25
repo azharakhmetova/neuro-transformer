@@ -211,7 +211,8 @@ def main(args, wandb_sweep: bool = False):
     utils.set_random_seed(args.seed, deterministic=args.deterministic)
 
     data.get_mouse_ids(args)
-    utils.compute_micro_batch_size(args)
+    if not args.amp:
+        utils.compute_micro_batch_size(args)
 
     train_ds, val_ds, test_ds = data.get_training_ds(
         args,
@@ -229,7 +230,7 @@ def main(args, wandb_sweep: bool = False):
         lr=args.lr,
         betas=(args.adam_beta1, args.adam_beta2),
         eps=args.adam_eps,
-        weight_decay=0,
+        weight_decay=0.01,
     )
     criterion = losses.get_criterion(args, ds=train_ds)
     scaler = GradScaler(enabled=args.amp)
@@ -556,6 +557,7 @@ if __name__ == "__main__":
         parser.add_argument("--num_samples_per_token", type=int, default=1)
         parser.add_argument("--num_modes", type=int, default=2)
         parser.add_argument("--use_neuron_coord_pe", action="store_true")
+        parser.add_argument("--use_mode_emb", action="store_true", help="use mode embedding on image & neuron tokens in the core.")
 
     # hyper-parameters for core module
     match temp_args.core:

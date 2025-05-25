@@ -286,6 +286,7 @@ class ViTCore(Core):
         super(ViTCore, self).__init__(args, name=name)
         self.register_buffer("reg_scale", torch.tensor(args.core_reg_scale))
         self.behavior_mode = args.behavior_mode
+        self.use_mode_emb = args.use_mode_emb
 
         if not hasattr(args, "grad_checkpointing"):
             args.grad_checkpointing = False
@@ -337,7 +338,7 @@ class ViTCore(Core):
             self.output_shape = (self.transformer.output_shape[-1], h, w)
             self.rearrange = Rearrange("b (h w) c -> b c h w", h=h, w=w)
         else:
-            self.output_shape = (num_image_patches, self.transformer.output_shape[-1]) #self.transformer.output_shape
+            self.output_shape = (num_image_patches, self.transformer.output_shape[-1]) # self.transformer.output_shape is (num_neuron_tokens+num_iage_tokens, emb_dim)
 
     @staticmethod
     def find_shape(num_patches: int):
@@ -365,10 +366,11 @@ class ViTCore(Core):
         if neuron_tokens is not None:
             if self.project_neuron:
                 neuron_tokens = self.neuron_projection(neuron_tokens)
-            image_mode = torch.zeros_like(image_tokens[..., 0], dtype=torch.long, device=image_tokens.device)
-            neuron_mode = torch.ones_like(neuron_tokens[..., 0], dtype=torch.long, device=neuron_tokens.device)
-            image_tokens += self.mode_embedding(image_mode)
-            neuron_tokens += self.mode_embedding(neuron_mode)
+            if self.use_mode_emb: 
+                image_mode = torch.zeros_like(image_tokens[..., 0], dtype=torch.long, device=image_tokens.device)
+                neuron_mode = torch.ones_like(neuron_tokens[..., 0], dtype=torch.long, device=neuron_tokens.device)
+                image_tokens += self.mode_embedding(image_mode)
+                neuron_tokens += self.mode_embedding(neuron_mode)
             outputs = torch.cat((image_tokens, neuron_tokens), dim=1)
         else:
             outputs = image_tokens

@@ -156,6 +156,7 @@ class Model(nn.Module):
                 {
                     "params": self.neuron_id_tokenizer.parameters(),
                     "name": "neuron_id_tokenizer",
+                    "weight_decay": 0.0,
                 }
             )
     
@@ -206,16 +207,20 @@ class Model(nn.Module):
             )
         return params
     
-    def tokenizer_l2(self, reduction: str = "sum"):
+    def id_tokenizer_l2(self, reduction: str = "sum"):
         l2 = self.neuron_id_tokenizer.embedding.weight.pow(2)
         return l2.sum() if reduction == "sum" else l2.mean()
+    
+    def id_tokenizer_l1(self, reduction: str = "sum"):
+        l1 = self.neuron_id_tokenizer.embedding.weight.abs()
+        return l1.sum() if reduction == "sum" else l1.mean()
 
     def regularizer(self, mouse_id: str):
         reg = 0
-        reg += self.tokenizer_l2(reduction="sum") * 0.0076
+        reg += self.id_tokenizer_l2(reduction="sum") * 0.0076
         if not self.core.frozen:
             reg += self.core.regularizer()
-        reg += self.readouts.regularizer(mouse_id=mouse_id)
+        # reg += self.readouts.regularizer(mouse_id=mouse_id)
         reg += self.image_cropper.regularizer(mouse_id=mouse_id)
         if self.core_shifter is not None:
             reg += self.core_shifter.regularizer(mouse_id=mouse_id)
@@ -272,7 +277,7 @@ class Model(nn.Module):
             shifts = self.core_shifter(pupil_centers, mouse_id=mouse_id)
         
         if self.readout_type == "attention":
-            query_neurons = self.neuron_id_tokenizer(neuron_ids=query_neuron_ids.to(torch.long)).unsqueeze(0) # (B, K, emb_dim_n_id)
+            query_neurons = self.neuron_id_tokenizer(neuron_ids=query_neuron_ids.to(torch.long).unsqueeze(0).expand(input_neuron_tokens.shape[0], -1)) # (B, K, emb_dim_n_id)
         outputs = self.readouts(outputs, mouse_id=mouse_id, query_neurons=query_neurons, shifts=shifts) # (B, num_neurons)
         # print("model readout output shape: ", outputs.shape)
         if activate:
