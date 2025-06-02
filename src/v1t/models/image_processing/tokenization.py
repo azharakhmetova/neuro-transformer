@@ -54,6 +54,7 @@ class Image2Patches(nn.Module):
         stride: int,
         emb_dim: int,
         dropout: float = 0.0,
+        learned: bool = False,
         pe_mode: str = "1d",
     ):
         super(Image2Patches, self).__init__()
@@ -108,7 +109,7 @@ class Image2Patches(nn.Module):
                 d_model=emb_dim,
                 dropout=dropout,
                 max_len=num_patches,
-                learned=False,
+                learned=learned,
                 mode=pe_mode,
                 ) #nn.Parameter(torch.randn(num_patches, emb_dim))
         elif pe_mode == "2d":
@@ -120,7 +121,7 @@ class Image2Patches(nn.Module):
                 dropout=dropout,
                 height=height,
                 width=width,
-                learned=False,
+                learned=learned,
                 mode=pe_mode,
                 )
         self.dropout = nn.Dropout(p=dropout)
@@ -153,7 +154,7 @@ class Image2Patches(nn.Module):
         # cls_tokens = repeat(self.cls_token, "1 1 d -> b 1 d", b=batch_size)
         # outputs = torch.cat((cls_tokens, patches), dim=1)
         if self.pe_mode == "1d":
-            outputs = patches + self.pos_embedding(outputs)
+            outputs = patches + self.pos_embedding(patches)
         elif self.pe_mode == "2d":
             patches = patches.reshape(batch_size, self.height, self.width, -1)
             # print("outputs shape before pos_embedding", outputs.shape)

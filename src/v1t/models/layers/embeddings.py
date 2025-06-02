@@ -47,7 +47,7 @@ class PositionalEncoding(nn.Module):
         self,
         d_model: int,
         dropout: float = 0.1,
-        max_len: int = 5000,
+        max_len: int = 10000,
         height: int = None,
         width: int = None,
         learned: bool = False,
@@ -113,7 +113,8 @@ class PositionalEncoding(nn.Module):
             if self.mode not in ('1d', 'both'):
                 raise RuntimeError("Module configured without 1D mode but got 3D input")
             L = x.size(1)
-            x = x + self.pe1[:, :L, :]
+            # print("PositionalEncoding: input length", L)
+            pe = self.pe1[:, :L, :]
         # elif x.dim() == 4 and self.mode == '1d':
         #     L = x.size(2)
         #     x = x + self.pe1[:, :L, :].unsqueeze(0)
@@ -121,7 +122,7 @@ class PositionalEncoding(nn.Module):
             if self.mode not in ('2d', 'both'):
                 raise RuntimeError("Module configured without 2D mode but got 4D input")
             H, W = x.size(1), x.size(2)
-            x = x + self.pe2[:, :H, :W, :]
+            pe = self.pe2[:, :H, :W, :]
         else:
             raise ValueError("Input tensor must be 3D or 4D")
-        return self.dropout(x)
+        return pe #self.dropout(x)

@@ -230,7 +230,7 @@ def main(args, wandb_sweep: bool = False):
         lr=args.lr,
         betas=(args.adam_beta1, args.adam_beta2),
         eps=args.adam_eps,
-        weight_decay=0.01,
+        weight_decay=args.weight_decay,
     )
     criterion = losses.get_criterion(args, ds=train_ds)
     scaler = GradScaler(enabled=args.amp)
@@ -249,7 +249,7 @@ def main(args, wandb_sweep: bool = False):
     if args.backend is not None:
         model = utils.compile(args, model=model)
 
-    utils.plot_samples(args, model=model, ds=train_ds, summary=summary, epoch=epoch)
+    # utils.plot_samples(args, model=model, ds=train_ds, summary=summary, epoch=epoch)
 
     while (epoch := epoch + 1) < args.epochs + 1:
         if args.verbose:
@@ -460,6 +460,7 @@ if __name__ == "__main__":
     )
 
     # optimizer settings
+    parser.add_argument("--weight_decay", type=float, default=0.0, help="weight decay for the optimizer.")
     parser.add_argument("--adam_beta1", type=float, default=0.9)
     parser.add_argument("--adam_beta2", type=float, default=0.9999)
     parser.add_argument("--adam_eps", type=float, default=1e-8)
@@ -547,23 +548,24 @@ if __name__ == "__main__":
         "--pe_before_SA", 
         type=str, 
         default="2d", 
-        choices=["1d", "2d", "none"], 
+        choices=["1d", "2d", "both"], 
     )
-    parser.add_argument("--learn_pe_before_SA", action="store_true")
+    parser.add_argument("--learned_pe_before_SA", action="store_true")
     parser.add_argument(
         "--pe_before_core",
         type=str, 
         default="2d", 
-        choices=["1d", "2d", "none"], 
+        choices=["1d", "2d", "both"], 
     )
-    parser.add_argument("--learn_pe_before_core", action="store_true")
+    parser.add_argument("--learned_pe_before_core", action="store_true")
+    parser.add_argument("--use_pe_after_core", action="store_true")
     parser.add_argument(
         "--pe_after_core",         
         type=str, 
         default="2d", 
         choices=["1d", "2d", "none"], 
     )
-    parser.add_argument("--learn_pe_after_core", action="store_true")
+    parser.add_argument("--learned_pe_after_core", action="store_true")
 
     
 
@@ -575,7 +577,10 @@ if __name__ == "__main__":
         parser.add_argument("--frac_input_neurons", type=float, default=0.0)
         parser.add_argument("--num_samples_per_token", type=int, default=1)
         parser.add_argument("--num_modes", type=int, default=2)
-        parser.add_argument("--use_neuron_coord_pe", action="store_true")
+        parser.add_argument("--use_input_neuron_pe", action="store_true")
+        parser.add_argument("--use_query_neuron_pe", action="store_true")
+        parser.add_argument("--neuron_pe_mode", type=str, default="coord", choices=["1d", "coord", "both"])
+        # parser.add_argument("--query_neuron_pe_mode", type=str, default="coord", choices=["1d", "coord"])
         parser.add_argument("--use_mode_emb", action="store_true", help="use mode embedding on image & neuron tokens in the core.")
 
     # hyper-parameters for core module

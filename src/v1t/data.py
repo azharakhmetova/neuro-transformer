@@ -424,6 +424,13 @@ class MiceDataset(Dataset):
     def i_transform_response(self, response: t.Union[np.ndarray, torch.Tensor]):
         return response / self._response_precision
 
+    def transform_coordinates(self):
+        coords = self.coordinates
+        mean = coords.mean(axis=0, keepdims=True)
+        std = coords.std(axis=0, keepdims=True) + 1e-6
+        return (coords - mean) / std
+    
+
     def __getitem__(self, idx: t.Union[int, torch.Tensor]):
         """Return data and metadata
 

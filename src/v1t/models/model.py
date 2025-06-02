@@ -13,6 +13,7 @@ from v1t.models.readout import Readouts
 from v1t.models.neuron_processing import NeuronIDTokenizer
 from v1t.models.neuron_processing import SimpleResponsesTokenizer 
 from v1t.models.image_processing import Image2Patches
+from v1t.models.layers import PositionalEncoding
 from v1t.utils.tensorboard import Summary
 from v1t.models.core_shifter import CoreShifters
 from v1t.models.image_cropper import ImageCropper
@@ -70,14 +71,18 @@ class Model(nn.Module):
         self.output_shapes = args.output_shapes
         self.shift_mode = args.shift_mode
         self.readout_type = args.readout
+        self.use_pe_after_core = args.use_pe_after_core
         self.pe_after_core = args.pe_after_core
-        self.use_neuron_coord_pe = args.use_neuron_coord_pe
+        self.use_input_neuron_pe = args.use_input_neuron_pe
+        self.use_query_neuron_pe = args.use_query_neuron_pe
+        self.neuron_pe_mode  = args.neuron_pe_mode
+        # self.query_neuron_pe_mode  = args.query_neuron_pe_mode
         self.tokenize_neurons = args.tokenize_neurons
         self.frac_input_neurons = args.frac_input_neurons
         if self.tokenize_neurons == 1:
             self.neuron_id_tokenizer = NeuronIDTokenizer(num_neurons=list(self.output_shapes.items())[0][1][0], emb_dim=args.emb_dim_n_id)#, device=args.device)
-            self.mode_embedding = nn.Embedding(args.num_modes, args.emb_dim_core)
-            # nn.init.constant_(self.mode_embedding.weight, 1.0 / args.emb_dim_core)
+            # self.mode_embedding = nn.Embedding(args.num_modes, args.emb_dim_core)
+            # # nn.init.constant_(self.mode_embedding.weight, 1.0 / args.emb_dim_core)
 
         self.add_module(
             "image_cropper",
@@ -90,6 +95,7 @@ class Model(nn.Module):
             stride=args.patch_stride,
             emb_dim=args.emb_dim_image,
             dropout=args.p_dropout,
+            learned = args.learned_pe_before_core,
             pe_mode=args.pe_before_core,
         )
         self.input_neuron_embedding = SimpleResponsesTokenizer(
@@ -102,13 +108,19 @@ class Model(nn.Module):
             device=args.device,
             use_masking=None,
         )
-        # self.neuron_pe = PositionalEncoding(
-        #     d_model=args.emb_dim,
-        #     max_len=list(self.output_shapes.items())[0][1][0],
-        #     mode="1d",
-        #     )
-        self.neuron_coord_pe = nn.Linear(3, args.emb_dim_n_response, bias=False)
 
+        if self.neuron_pe_mode in ("1d", "both"):
+            self.neuron_pe = PositionalEncoding(
+                d_model=args.emb_dim_n_response,
+                mode="1d",
+                )
+        if self.neuron_pe_mode in ("coord", "both"):
+            self.neuron_coord_pe = nn.Linear(3, args.emb_dim_n_response)
+
+        self.project_query_pe = args.emb_dim_n_response != args.emb_dim_n_id
+        if self.project_query_pe:
+            self.projection_query_pe = nn.Linear(args.emb_dim_n_response, args.emb_dim_n_id)
+            
         self.add_module(
             name="core",
             module=get_core(args)(
@@ -167,13 +179,20 @@ class Model(nn.Module):
                 "name": "input_neuron_embeddings",
             }
         )
-
-        params.append(
-            {
-                "params": self.neuron_coord_pe.parameters(),
-                "name": "input_neuron_positional_embeddings",
-            }
-        )
+        if self.neuron_pe_mode in ("1d", "both"):
+            params.append(
+                {
+                    "params": self.neuron_pe.parameters(),
+                    "name": "neuron_fixed_positional_embeddings",
+                }
+            )
+        if self.neuron_pe_mode in ("coord", "both"):
+            params.append(
+                {
+                    "params": self.neuron_coord_pe.parameters(),
+                    "name": "neuron_coordinate_positional_embeddings",
+                }
+            )
         
         params.append(
             {
@@ -223,7 +242,7 @@ class Model(nn.Module):
 
     def regularizer(self, mouse_id: str):
         reg = 0
-        reg += self.id_tokenizer_l2(reduction="sum") * 0.0076
+        reg += self.id_tokenizer_l1(reduction="sum") * 0.0076
         if not self.core.frozen:
             reg += self.core.regularizer()
         # reg += self.readouts.regularizer(mouse_id=mouse_id)
@@ -251,9 +270,6 @@ class Model(nn.Module):
             pupil_centers=pupil_centers,
         )
 
-        # if self.frac_input_neurons > 0:
-        #     raise NotImplementedError("fraction of input neurons not implemented")
-        # else:
         image_tokens = self.patch_embedding(images) 
 
         if self.frac_input_neurons > 0:
@@ -264,9 +280,17 @@ class Model(nn.Module):
                 responses=responses[:, input_neuron_ids, :],
                 neuron_id_tokens=input_neuron_id_tokens,
             )
-            if self.use_neuron_coord_pe:
-                input_coords = neuron_coords[:, input_neuron_ids, :]    # (B, K, 3)
-                input_neuron_tokens += self.neuron_coord_pe(input_coords) #[:, input_neuron_ids.to(torch.long), :]
+            if self.use_input_neuron_pe:
+                if self.neuron_pe_mode == "1d":
+                    # print(self.neuron_pe(responses).shape)
+                    # print(self.neuron_pe(responses)[:, input_neuron_ids, :].shape)
+                    input_neuron_tokens += self.neuron_pe(responses)[:, input_neuron_ids, :]
+                elif self.neuron_pe_mode == "coord":
+                    input_coords = neuron_coords[:, input_neuron_ids, :]    # (B, K, 3)
+                    input_neuron_tokens += self.neuron_coord_pe(input_coords) #[:, input_neuron_ids.to(torch.long), :]
+                elif self.neuron_pe_mode == "both":
+                    input_coords = neuron_coords[:, input_neuron_ids, :]  
+                    input_neuron_tokens += (self.neuron_pe(responses)[:, input_neuron_ids, :] + self.neuron_coord_pe(input_coords))
         else:
             input_neuron_tokens = None
 
@@ -278,7 +302,7 @@ class Model(nn.Module):
             pupil_centers=pupil_centers,
         )
         # add positional encoding after the core
-        if self.pe_after_core == "2d":
+        if self.use_pe_after_core and self.pe_after_core == "2d":
             temp = outputs.reshape(outputs.shape[0], self.patch_embedding.height, self.patch_embedding.width, outputs.shape[-1])  # (B, h, w, num_channels)
             temp += self.patch_embedding.pos_embedding(temp)
             outputs = temp.reshape(outputs.shape[0], -1, outputs.shape[-1])  # (B, num_tokens, num_channels)
@@ -288,7 +312,25 @@ class Model(nn.Module):
             shifts = self.core_shifter(pupil_centers, mouse_id=mouse_id)
         
         if self.readout_type == "attention":
-            query_neurons = self.neuron_id_tokenizer(neuron_ids=query_neuron_ids.to(torch.long).unsqueeze(0).expand(input_neuron_tokens.shape[0], -1)) # (B, K, emb_dim_n_id)
+            query_neurons = self.neuron_id_tokenizer(neuron_ids=query_neuron_ids.to(torch.long).unsqueeze(0).expand(input_neuron_tokens.shape[0], -1)) # (B, N-K, emb_dim_n_id)
+            if self.use_query_neuron_pe:   
+                if self.neuron_pe_mode == "1d":
+                    if self.project_query_pe:
+                        query_neurons += self.projection_query_pe(self.neuron_pe(responses)[:, query_neuron_ids, :])
+                    else:
+                        query_neurons += self.neuron_pe(responses)[:, query_neuron_ids, :]
+                elif self.neuron_pe_mode == "coord":
+                    query_coords = neuron_coords[:, query_neuron_ids, :]
+                    if self.project_query_pe:
+                        query_neurons += self.projection_query_pe(self.neuron_coord_pe(query_coords))
+                    else:
+                        query_neurons += self.neuron_coord_pe(query_coords)
+                elif self.neuron_pe_mode == "both":
+                    query_coords = neuron_coords[:, query_neuron_ids, :]
+                    if self.project_query_pe:
+                        query_neurons += (self.projection_query_pe(self.neuron_coord_pe(query_coords)) + self.projection_query_pe(self.neuron_pe(responses)[:, query_neuron_ids, :]))
+                    else:
+                        query_neurons += (self.neuron_coord_pe(query_coords) + self.neuron_pe(responses)[:, query_neuron_ids, :])
         outputs = self.readouts(outputs, mouse_id=mouse_id, query_neurons=query_neurons, shifts=shifts) # (B, num_neurons)
         # print("model readout output shape: ", outputs.shape)
         if activate:
