@@ -132,6 +132,9 @@ class Image2Patches(nn.Module):
 
     @staticmethod
     def find_shape(num_patches: int):
+        """
+        Given num_patches find the dimensions (height and width) of a 2D grid whose area is equal to num_patches.
+        """
         dim1 = math.ceil(math.sqrt(num_patches))
         while num_patches % dim1 != 0 and dim1 > 0:
             dim1 -= 1
@@ -140,6 +143,7 @@ class Image2Patches(nn.Module):
     
     @staticmethod
     def unfold_dim(h: int, w: int, patch_size: int, padding: int = 0, stride: int = 1):
+        """Compute the number of patches that can be extracted from an image."""
         l = lambda s: math.floor(((s + 2 * padding - patch_size) / stride) + 1)
         return l(h) * l(w)
 

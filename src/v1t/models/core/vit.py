@@ -12,6 +12,7 @@ from torch.nn import functional as F
 from torch.nn.attention import SDPBackend, sdpa_kernel
 
 from v1t.models.utils import DropPath
+from v1t.models.layers import scaled_dot_product_attention
 
 
 class MLP(nn.Module):
@@ -94,14 +95,14 @@ class Attention(nn.Module):
         emb_dim: int,
         num_heads: int = 8,
         dropout: float = 0.0,
-        use_flash_a: bool = False,
+        use_flash_attention: bool = False,
         use_lsa: bool = False,
         use_bias: bool = True,
         grad_checkpointing: bool = False,
     ):
         super(Attention, self).__init__()
         self.grad_checkpointing = grad_checkpointing
-        self.use_flash_a = use_flash_a
+        self.use_flash_attention = use_flash_attention
         inner_dim = emb_dim * num_heads
 
         self.layer_norm = nn.LayerNorm(emb_dim)
@@ -150,33 +151,12 @@ class Attention(nn.Module):
     #     attn = self.dropout(attn)
     #     outputs = einsum(attn, v, "b h n i, b h i d -> b h n d")
     #     return outputs
-    def scaled_dot_product_attention(self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor):
-        """ 
-        q: [B, H, N, D_head]
-        k, v: [B, H, S, D_head]
-        """
-        if q.device.type == "cuda" and self.use_flash_a: #and q.dtype in (torch.float16,torch.bfloat16):
-            with sdpa_kernel([SDPBackend.FLASH_ATTENTION]):
-                return F.scaled_dot_product_attention(
-                    q, k, v,
-                    attn_mask=self.mask,
-                    dropout_p=self.dropout.p,
-                    is_causal=False,
-                )
-        else:
-            # print("Using standard attention in core")
-            return F.scaled_dot_product_attention(
-            q, k, v,
-            attn_mask=self.mask,
-            dropout_p=self.dropout.p,
-            is_causal=False,
-            )
         
     def mha(self, inputs: torch.Tensor):
         inputs = self.layer_norm(inputs)
         q, k, v = torch.chunk(self.to_qkv(inputs), chunks=3, dim=-1)
-        outputs = self.scaled_dot_product_attention(
-            q=self.rearrange(q), k=self.rearrange(k), v=self.rearrange(v)
+        outputs = scaled_dot_product_attention(
+            q=self.rearrange(q), k=self.rearrange(k), v=self.rearrange(v), dropout=self.dropout.p, use_flash_attention=self.use_flash_attention,
         )
         outputs = rearrange(outputs, "b h n d -> b n (h d)")
         outputs = self.projection(outputs)
@@ -203,7 +183,7 @@ class Transformer(nn.Module):
         dropout: float,
         behavior_mode: int,
         mouse_ids: t.List[str],
-        use_flash_a: bool = False,
+        use_flash_attention: bool = False,
         use_lsa: bool = False,
         drop_path: float = 0.0,
         use_bias: bool = True,
@@ -219,7 +199,7 @@ class Transformer(nn.Module):
                         emb_dim=emb_dim,
                         num_heads=num_heads,
                         dropout=dropout,
-                        use_flash_a=use_flash_a,
+                        use_flash_attention=use_flash_attention,
                         use_lsa=use_lsa,
                         use_bias=use_bias,
                         grad_checkpointing=grad_checkpointing,
@@ -314,7 +294,7 @@ class ViTCore(Core):
             dropout=args.t_dropout,
             behavior_mode=self.behavior_mode,
             mouse_ids=list(args.output_shapes.keys()),
-            use_flash_a=args.amp,
+            use_flash_attention=args.amp,
             use_lsa=args.use_lsa,
             drop_path=args.drop_path,
             use_bias=not args.disable_bias,
@@ -377,10 +357,9 @@ class ViTCore(Core):
         if self.behavior_mode in (3, 4):
             behaviors = torch.cat((behaviors, pupil_centers), dim=-1)
         outputs = self.transformer(outputs, mouse_id=mouse_id, behaviors=behaviors)
+        # subselect only image patches because they represent 'receptive fields' of neurons and can be optionally conditioned on input neuron tokens
         outputs = outputs[:, :self.num_image_patches, :] 
         # outputs = outputs[:, 1:, :]  # remove CLS token
         if self.readout == "gaussian2d":
-            # outputs = outputs[:, :self.image_encoder_num_patches, :] 
             outputs = self.rearrange(outputs)
-        # print("core outputs shape", outputs.shape)
         return outputs

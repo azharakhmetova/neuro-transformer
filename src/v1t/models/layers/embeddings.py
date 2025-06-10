@@ -18,7 +18,6 @@ class ModeTokenizer(nn.Module):
     ):
         super(ModeTokenizer, self).__init__()
         self.embedding = nn.Embedding(num_modes, emb_dim)
-        nn.init.constant_(self.embedding.weight, 1.0 / emb_dim)
 
     def forward(self, mode: torch.Tensor):
         if mode.dtype != torch.long:
@@ -28,6 +27,7 @@ class ModeTokenizer(nn.Module):
 
 class PositionalEncoding(nn.Module):
     """
+    Code reference: https://github.com/KonstantinWilleke/neuralpredictors/blob/4ef51533f948970e511ee6061711db25e5e52217/neuralpredictors/utils.py#L172
     1D & 2D sinusoidal or learned positional encoding for
     - 3D input: (B, C, L)
     - 4D input: (B, C, H, W)

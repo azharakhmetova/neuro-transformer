@@ -43,6 +43,7 @@ class SimpleResponsesTokenizer(nn.Module):
         self, 
         args,
         num_neurons: int,
+        # output_shapes: t.Dict[str, tuple],
         num_samples_per_neuron: int,
         num_samples_per_token: int, 
         frac_input_neurons: float,
@@ -56,7 +57,7 @@ class SimpleResponsesTokenizer(nn.Module):
         self.num_input_neurons = int(frac_input_neurons * num_neurons)
         self.samples_per_token = num_samples_per_token
         self.tokenizer = nn.Linear(num_samples_per_token, emb_dim)
-        # add session tokenizer? self.session_tokenizer = nn.Embedding(len(num_neurons), token_dim, device=device)
+        # self.session_tokenizer = nn.Embedding(len(num_neurons), emb_dim, device=device)
         self.T = self.num_tokens_per_neuron(num_samples_per_neuron)
         self.num_input_tokens = self.num_input_neurons * self.T
         self.output_shape = (self.num_input_tokens, emb_dim) 

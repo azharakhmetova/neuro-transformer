@@ -52,15 +52,6 @@ def get_model_info(
 
 
 class Model(nn.Module):
-    """
-    shift mode:
-        0 - disable shifter
-        1 - shift input to core module
-        2 - shift input to readout module
-        3 - shift input to both core and readout module
-        4 - shift_mode=3 and provide both behavior and pupil center to cropper
-    """
-
     def __init__(self, args: t.Any, ds: t.Dict[str, DataLoader], name: str = "Model"):
         super(Model, self).__init__()
         assert isinstance(
@@ -76,13 +67,10 @@ class Model(nn.Module):
         self.use_input_neuron_pe = args.use_input_neuron_pe
         self.use_query_neuron_pe = args.use_query_neuron_pe
         self.neuron_pe_mode  = args.neuron_pe_mode
-        # self.query_neuron_pe_mode  = args.query_neuron_pe_mode
         self.tokenize_neurons = args.tokenize_neurons
         self.frac_input_neurons = args.frac_input_neurons
         if self.tokenize_neurons == 1:
             self.neuron_id_tokenizer = NeuronIDTokenizer(num_neurons=list(self.output_shapes.items())[0][1][0], emb_dim=args.emb_dim_n_id)#, device=args.device)
-            # self.mode_embedding = nn.Embedding(args.num_modes, args.emb_dim_core)
-            # # nn.init.constant_(self.mode_embedding.weight, 1.0 / args.emb_dim_core)
 
         self.add_module(
             "image_cropper",
@@ -273,6 +261,7 @@ class Model(nn.Module):
         image_tokens = self.patch_embedding(images) 
 
         if self.frac_input_neurons > 0:
+            # add time dimension for image responses
             if responses.dim() != 3:
                 responses = responses.unsqueeze(-1)
             input_neuron_id_tokens = self.neuron_id_tokenizer(input_neuron_ids.to(torch.long))
@@ -301,12 +290,16 @@ class Model(nn.Module):
             behaviors=behaviors,
             pupil_centers=pupil_centers,
         )
-        # add positional encoding after the core
-        if self.use_pe_after_core and self.pe_after_core == "2d":
-            temp = outputs.reshape(outputs.shape[0], self.patch_embedding.height, self.patch_embedding.width, outputs.shape[-1])  # (B, h, w, num_channels)
-            temp += self.patch_embedding.pos_embedding(temp)
-            outputs = temp.reshape(outputs.shape[0], -1, outputs.shape[-1])  # (B, num_tokens, num_channels)
-        # print("model core output shape: ", outputs.shape)
+        # CHANGE LEARNABLE CASE and remove it from attention readout
+        # add positional encoding after the core 
+        if self.use_pe_after_core:
+            if self.pe_after_core == "2d":
+                temp = outputs.reshape(outputs.shape[0], self.patch_embedding.height, self.patch_embedding.width, outputs.shape[-1])  # (B, h, w, num_channels)
+                temp += self.patch_embedding.pos_embedding(temp)
+                outputs = temp.reshape(outputs.shape[0], -1, outputs.shape[-1])  # (B, num_tokens, num_channels)
+            elif self.pe_after_core == "1d":
+                outputs += self.patch_embedding.pos_embedding(outputs)
+
         shifts = None
         if self.core_shifter is not None:
             shifts = self.core_shifter(pupil_centers, mouse_id=mouse_id)

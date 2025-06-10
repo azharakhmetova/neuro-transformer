@@ -30,6 +30,7 @@ def set_random_seed(seed: int, deterministic: bool = False):
     torch.cuda.manual_seed(seed)
     if deterministic:
         torch.backends.cudnn.benchmark = False
+        torch.backends.cudnn.deterministic = True # added 03.06.25
         torch.use_deterministic_algorithms(True)
 
 
@@ -84,20 +85,21 @@ def inference(
     model.train(False)
     for batch in ds:
         for micro_batch in data.micro_batching(batch, batch_size=micro_batch_size):
-            predictions, _, _ = model(
-                images=micro_batch["image"].to(device),
-                responses=micro_batch["response"].to(device),
-                neuron_coords=micro_batch["neuron_coordinates"].to(device),
-                input_neuron_ids=micro_batch["input_neuron_ids"].to(device),
-                query_neuron_ids=micro_batch["query_neuron_ids"].to(device),
-                mouse_id=mouse_id,
-                behaviors=micro_batch["behavior"].to(device),
-                pupil_centers=micro_batch["pupil_center"].to(device),
-            )
-            results["predictions"].append(predictions.cpu())
-            results["targets"].append(micro_batch["response"])
-            results["image_ids"].append(micro_batch["image_id"])
-            results["trial_ids"].append(micro_batch["trial_id"])
+            with autocast(device_type=device.type, dtype=torch.float16):
+                predictions, _, _ = model(
+                    images=micro_batch["image"].to(device),
+                    responses=micro_batch["response"].to(device),
+                    neuron_coords=micro_batch["neuron_coordinates"].to(device),
+                    input_neuron_ids=micro_batch["input_neuron_ids"].to(device),
+                    query_neuron_ids=micro_batch["query_neuron_ids"].to(device),
+                    mouse_id=mouse_id,
+                    behaviors=micro_batch["behavior"].to(device),
+                    pupil_centers=micro_batch["pupil_center"].to(device),
+                )
+                results["predictions"].append(predictions.cpu())
+                results["targets"].append(micro_batch["response"])
+                results["image_ids"].append(micro_batch["image_id"])
+                results["trial_ids"].append(micro_batch["trial_id"])
     results = {
         k: torch.cat(v, dim=0) if isinstance(v[0], torch.Tensor) else v
         for k, v in results.items()
@@ -149,13 +151,10 @@ def evaluate(
 
         mouse_metric = Metrics(ds=mouse_ds, results=outputs[mouse_id])
 
-        results["single_trial_correlation"][
-            mouse_id
-        ] = mouse_metric.single_trial_correlation(per_neuron=True)
+        results["single_trial_correlation"][mouse_id] = mouse_metric.single_trial_correlation(per_neuron=True)
+        
         if mouse_metric.repeat_image and not mouse_metric.hashed:
-            results["correlation_to_average"][
-                mouse_id
-            ] = mouse_metric.correlation_to_average(per_neuron=True)
+            results["correlation_to_average"][mouse_id] = mouse_metric.correlation_to_average(per_neuron=True)
             results["feve"][mouse_id] = mouse_metric.feve(per_neuron=True)
 
         del mouse_metric
@@ -447,10 +446,6 @@ def compute_micro_batch_size(
             for _ in range(batch_iterations):
                 for mouse_id in mouse_ids:
                     batch_loss = 0.0
-                    # if args.frac_input_neurons == 1.0:
-                    #     query_neuron_ids = torch.arange(args.output_shapes[mouse_id][0]).view(-1).to(device)
-                    # else:                    
-                        # query_neuron_ids = torch.arange(int(args.frac_input_neurons * args.output_shapes[mouse_id][0]), args.output_shapes[mouse_id][0]).view(-1).to(device)
                     for _ in range(micro_iterations):
                         outputs, _, _ = model(
                             images=random_input((micro_batch_size, *image_shape)),

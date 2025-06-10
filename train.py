@@ -211,8 +211,8 @@ def main(args, wandb_sweep: bool = False):
     utils.set_random_seed(args.seed, deterministic=args.deterministic)
 
     data.get_mouse_ids(args)
-    if not args.amp:
-        utils.compute_micro_batch_size(args)
+    # if not args.amp:
+    #     utils.compute_micro_batch_size(args)
 
     train_ds, val_ds, test_ds = data.get_training_ds(
         args,
@@ -462,7 +462,7 @@ if __name__ == "__main__":
     # optimizer settings
     parser.add_argument("--weight_decay", type=float, default=0.0, help="weight decay for the optimizer.")
     parser.add_argument("--adam_beta1", type=float, default=0.9)
-    parser.add_argument("--adam_beta2", type=float, default=0.9999)
+    parser.add_argument("--adam_beta2", type=float, default=0.999) # was 0.9999 10.06.25 12:43
     parser.add_argument("--adam_eps", type=float, default=1e-8)
     parser.add_argument(
         "--criterion",
@@ -533,7 +533,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--shift_mode",
         type=int,
-        default=2,
+        default=0,
         choices=[0, 1, 2, 3, 4],
         help="shift mode: "
         "0 - disable shifter, "
@@ -571,7 +571,7 @@ if __name__ == "__main__":
 
     temp_args = parser.parse_known_args()[0]
 
-    if temp_args.tokenize_neurons == 1:
+    if temp_args.tokenize_neurons:
         parser.add_argument("--emb_dim_n_id", type=int, default=160)
         parser.add_argument("--emb_dim_n_response", type=int, default=150)
         parser.add_argument("--frac_input_neurons", type=float, default=0.0)
@@ -623,7 +623,7 @@ if __name__ == "__main__":
             )
             parser.add_argument("--num_blocks", type=int, default=4)
             parser.add_argument("--num_heads", type=int, default=4)
-            parser.add_argument("--emb_dim_core", type=int, default=156)
+            parser.add_argument("--emb_dim_core", type=int, default=156) # 155 -> 156 due to having even number for positional embeddings for visual input
             parser.add_argument("--mlp_dim", type=int, default=488)
             parser.add_argument(
                 "--p_dropout",

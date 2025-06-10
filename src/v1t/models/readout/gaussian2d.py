@@ -237,7 +237,6 @@ class Gaussian2DReadout(Readout):
     def forward(
         self,
         inputs: torch.Tensor,
-        query_neurons: torch.Tensor = None, 
         sample: bool = None,
         shifts: torch.Tensor = None,
     ):

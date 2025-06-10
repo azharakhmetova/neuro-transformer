@@ -13,10 +13,13 @@ from torch.nn import functional as F
 from torch.nn.attention import SDPBackend, sdpa_kernel
 import warnings
 
+from v1t.models.layers import scaled_dot_product_attention
 from v1t.models.utils import DropPath
 
 REDUCTIONS = t.Literal["sum", "mean", None]
-
+"""
+code reference: https://github.com/KonstantinWilleke/neuralpredictors/blob/4ef51533f948970e511ee6061711db25e5e52217/neuralpredictors/layers/attention_readout.py
+"""
 class CrossAttention(nn.Module):
     def __init__(
         self,
@@ -33,13 +36,13 @@ class CrossAttention(nn.Module):
         value_embedding: bool = False,
         use_layer_norm: bool = False,
         use_pos_embedding: bool = True,
-        use_flash_a: bool = False,
+        use_flash_attention: bool = False,
         temperature: tuple = (False, 1.0)
     ):
         super(CrossAttention, self).__init__()
 
         self.grad_checkpointing = grad_checkpointing
-        self.use_flash_a = use_flash_a
+        self.use_flash_attention = use_flash_attention
         self.use_pos_embedding = use_pos_embedding
         self.key_embedding = key_embedding
         self.value_embedding = value_embedding
@@ -97,36 +100,9 @@ class CrossAttention(nn.Module):
     #     outputs = einsum(attn, v, "b h n i, b h i d -> b h n d")
     #     return outputs
     
-    def scaled_dot_product_attention(self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor):
-        """ 
-        q: [B, H, N, D_head]
-        k, v: [B, H, S, D_head]
-        """
-        if q.device.type == "cuda" and self.use_flash_a:
-            # Dispatch through FlashAttention (or fall back) via PyTorch’s 
-            # print("Using FlashAttention")
-            with sdpa_kernel([SDPBackend.FLASH_ATTENTION]):
-                out = F.scaled_dot_product_attention(
-                    q, k, v,
-                    attn_mask=None,
-                    dropout_p=self.dropout.p,
-                    is_causal=False
-                )
-        else:
-            # print("Using standard attention")
-            out = F.scaled_dot_product_attention(
-                q, k, v,
-                attn_mask=None,
-                dropout_p=self.dropout.p,
-                is_causal=False
-            )            
-        # out shape is [B, H, N, D_head]
-        return out
 
     def mha(self, q: torch.Tensor, inputs: torch.Tensor):
         q = self.layer_norm(q) # [B, N_query_neurons, emb_dim]
-        # print("crossAttention query shape: ", q.shape) # [B, N_query_neurons, emb_dim]
-        # print("CrossAttention inputs shape: ", inputs.shape) # [B, num_image_tokens, num_channels]
         inputs = self.layer_norm_inputs(inputs) # [B, num_image_tokens, num_channels]
 
         if self.use_pos_embedding:
@@ -151,7 +127,7 @@ class CrossAttention(nn.Module):
 
         q = rearrange(q, "b n (h d) -> b h n d", h=self.heads)
 
-        outputs = self.scaled_dot_product_attention(q=q, k=k, v=v)
+        outputs = scaled_dot_product_attention(q=q, k=k, v=v, dropout=self.dropout.p, use_flash_attention=self.use_flash_attention)
         outputs = rearrange(outputs, "b h n d -> b n (h d)")
         return outputs
 
@@ -161,16 +137,6 @@ class CrossAttention(nn.Module):
         else:
             outputs = self.mha(q, inputs)
         return outputs
-
-
-# class NeuronTokenizer(nn.Module):
-#     def __init__(self, num_neurons: int, emb_dim: int):
-#         super(NeuronTokenizer, self).__init__()
-#         self.embedding = nn.Embedding(num_neurons, emb_dim)
-#         nn.init.constant_(self.embedding.weight, 1.0 / emb_dim)
-
-#     def forward(self, neuron_ids: torch.Tensor):
-#         return self.embedding(neuron_ids)
 
 
 @register("attention")
@@ -214,7 +180,7 @@ class AttentionReadout(Readout):
             scale=scale,
             temperature=temperature,
             use_pos_embedding=use_pos_embedding,
-            use_flash_a=args.amp,
+            use_flash_attention=args.amp,
         )
 
         self.dropout = nn.Dropout(p=dropout)
@@ -224,7 +190,6 @@ class AttentionReadout(Readout):
             self.id_query_projection = nn.Linear(in_features=args.emb_dim_n_id, out_features=args.emb_dim_r, bias=False)
 
         self.neuron_projection = nn.Linear(in_features=args.emb_dim_r, out_features=1, bias=True)
-        # nn.init.constant_(self.neuron_projection.weight, 1.0/args.emb_dim_r)
     
     def feature_l1(self, reduction: str = "sum"):
         l1 = self.neuron_projection.weight.abs()
@@ -240,7 +205,7 @@ class AttentionReadout(Readout):
         return self.reg_scale * self.feature_l1(reduction=reduction)
 
 
-    def forward(self, inputs: torch.Tensor, query_neurons: torch.Tensor = None, shifts: torch.Tensor = None): 
+    def forward(self, inputs: torch.Tensor, query_neurons: t.Optional[torch.Tensor] = None, shifts: t.Optional[torch.Tensor] = None): 
         b, t, c = inputs.size()
         # print("readout inputs shape: ", inputs.shape) # (B, num_tokens, num_channels)
         # print("readout query_neurons shape: ", query_neurons.shape)
@@ -256,19 +221,13 @@ class AttentionReadout(Readout):
         # else:
         #     neuron_ids = neuron_ids.clone().to(inputs.device).unsqueeze(0).expand(b, -1)
 
-        # neuron_queries = self.neuron_tokenizer(neuron_ids)
         if self.project_query_neurons:
             query_neurons = self.id_query_projection(query_neurons)
-        query_neurons = self.dropout(query_neurons)
-        # print("readout neuron_queries shape: ", query_neurons.shape) # [B, N_neurons, emb_dim]
-
-        # inputs = rearrange(inputs, 'b c h w -> b (h w) c')  # flatten spatial dims
+        # query_neurons = self.dropout(query_neurons) # [B, N_neurons, emb_dim]
 
         outputs = self.cross_attention(q=query_neurons, inputs=inputs)
-        outputs = self.dropout(outputs) # [B, N_neurons, emb_dim]
-        # print("readout outputs shape: ", outputs.shape)
+        # outputs = self.dropout(outputs) # [B, N_neurons, emb_dim]
         outputs = self.neuron_projection(outputs).squeeze(-1)  # [B, N_neurons]
-        # print("readout outputs after projection shape: ", outputs.shape)
         return outputs
 
     
