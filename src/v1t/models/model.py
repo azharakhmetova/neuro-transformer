@@ -55,11 +55,12 @@ class Model(nn.Module):
     def __init__(self, args: t.Any, ds: t.Dict[str, DataLoader], name: str = "Model"):
         super(Model, self).__init__()
         assert isinstance(
-            args.output_shapes, dict
+            args.num_output_neurons, dict
         ), "output_shapes must be a dictionary of mouse_id and output_shape"
         self.name = name
         self.input_shape = args.input_shape
-        self.output_shapes = args.output_shapes
+        self.num_output_neurons = args.num_output_neurons
+        print("num_output_neurons", self.num_output_neurons)
         self.shift_mode = args.shift_mode
         self.readout_type = args.readout
         self.use_pe_after_core = args.use_pe_after_core
@@ -70,7 +71,14 @@ class Model(nn.Module):
         self.tokenize_neurons = args.tokenize_neurons
         self.frac_input_neurons = args.frac_input_neurons
         if self.tokenize_neurons == 1:
-            self.neuron_id_tokenizer = NeuronIDTokenizer(num_neurons=list(self.output_shapes.items())[0][1][0], emb_dim=args.emb_dim_n_id)#, device=args.device)
+            self.session_tokenizer = nn.Embedding(len(self.num_output_neurons), args.emb_dim_n_id)
+            self.sessions_enc = {}
+            for i, s in enumerate(self.num_output_neurons.keys()):
+                self.sessions_enc[s] = torch.Tensor([i]).long().to(args.device)
+
+            self.neuron_id_tokenizer = nn.ModuleDict({})
+            for key, num_neurons in self.num_output_neurons.items():
+                self.neuron_id_tokenizer[key] = NeuronIDTokenizer(num_neurons=num_neurons[0], emb_dim=args.emb_dim_n_id)#, device=args.device)
 
         self.add_module(
             "image_cropper",
@@ -88,7 +96,7 @@ class Model(nn.Module):
         )
         self.input_neuron_embedding = SimpleResponsesTokenizer(
             args,
-            num_neurons=list(self.output_shapes.items())[0][1][0],
+            num_output_neurons=args.num_output_neurons,
             num_samples_per_neuron=1,
             frac_input_neurons=args.frac_input_neurons,
             num_samples_per_token=args.num_samples_per_token,
@@ -137,7 +145,7 @@ class Model(nn.Module):
                 args,
                 model=args.readout,
                 input_shape=self.core.output_shape,
-                output_shapes=self.output_shapes,
+                output_shapes=self.num_output_neurons,
                 ds=ds,
             ),
         )
@@ -153,35 +161,44 @@ class Model(nn.Module):
 
         # separate learning rate for core module from the rest
         params = []
-        params.append(
-                {
-                    "params": self.neuron_id_tokenizer.parameters(),
-                    "name": "neuron_id_tokenizer",
-                    "weight_decay": 0.0,
-                }
-            )
-    
-        params.append(
-            {
-                "params": self.input_neuron_embedding.parameters(),
-                "name": "input_neuron_embeddings",
-            }
-        )
-        if self.neuron_pe_mode in ("1d", "both"):
+
+        if self.tokenize_neurons:
             params.append(
                 {
-                    "params": self.neuron_pe.parameters(),
-                    "name": "neuron_fixed_positional_embeddings",
+                    "params": self.session_tokenizer.parameters(),
+                    "name": "session_tokenizer",
                 }
             )
-        if self.neuron_pe_mode in ("coord", "both"):
-            params.append(
-                {
-                    "params": self.neuron_coord_pe.parameters(),
-                    "name": "neuron_coordinate_positional_embeddings",
-                }
-            )
+            for key, tokenizer in self.neuron_id_tokenizer.items():
+                params.append(
+                    {
+                        "params": tokenizer.parameters(),
+                        "name": f"neuron_id_tokenizer_{key}",
+                        "weight_decay": 0.0,
+                    }
+                )
         
+            params.append(
+                {
+                    "params": self.input_neuron_embedding.parameters(),
+                    "name": "input_neuron_embeddings",
+                }
+            )
+            if self.neuron_pe_mode in ("1d", "both"):
+                params.append(
+                    {
+                        "params": self.neuron_pe.parameters(),
+                        "name": "neuron_fixed_positional_embeddings",
+                    }
+                )
+            if self.neuron_pe_mode in ("coord", "both"):
+                params.append(
+                    {
+                        "params": self.neuron_coord_pe.parameters(),
+                        "name": "neuron_coordinate_positional_embeddings",
+                    }
+                )
+            
         params.append(
             {
                 "params": self.patch_embedding.parameters(),
@@ -221,11 +238,17 @@ class Model(nn.Module):
         return params
     
     def id_tokenizer_l2(self, reduction: str = "sum"):
-        l2 = self.neuron_id_tokenizer.embedding.weight.pow(2)
+        all_weights = torch.cat(
+            [tok.embedding.weight.view(-1) for tok in self.neuron_id_tokenizer.values()]
+        )
+        l2 = all_weights.pow(2)
         return l2.sum() if reduction == "sum" else l2.mean()
     
     def id_tokenizer_l1(self, reduction: str = "sum"):
-        l1 = self.neuron_id_tokenizer.embedding.weight.abs()
+        all_weights = torch.cat(
+            [tok.embedding.weight.view(-1) for tok in self.neuron_id_tokenizer.values()]
+        )
+        l1 = all_weights.abs()
         return l1.sum() if reduction == "sum" else l1.mean()
 
     def regularizer(self, mouse_id: str):
@@ -264,9 +287,10 @@ class Model(nn.Module):
             # add time dimension for image responses
             if responses.dim() != 3:
                 responses = responses.unsqueeze(-1)
-            input_neuron_id_tokens = self.neuron_id_tokenizer(input_neuron_ids.to(torch.long))
+            input_neuron_id_tokens = self.neuron_id_tokenizer[mouse_id](input_neuron_ids.to(torch.long)) + self.session_tokenizer(self.sessions_enc[mouse_id].to(self.device))  # (B, K, emb_dim_n_id)
             input_neuron_tokens = self.input_neuron_embedding(
                 responses=responses[:, input_neuron_ids, :],
+                mouse_id=mouse_id,
                 neuron_id_tokens=input_neuron_id_tokens,
             )
             if self.use_input_neuron_pe:
@@ -305,7 +329,7 @@ class Model(nn.Module):
             shifts = self.core_shifter(pupil_centers, mouse_id=mouse_id)
         
         if self.readout_type == "attention":
-            query_neurons = self.neuron_id_tokenizer(neuron_ids=query_neuron_ids.to(torch.long).unsqueeze(0).expand(input_neuron_tokens.shape[0], -1)) # (B, N-K, emb_dim_n_id)
+            query_neurons = self.session_tokenizer(self.sessions_enc[mouse_id].to(self.device)) + self.neuron_id_tokenizer[mouse_id](neuron_ids=query_neuron_ids.to(torch.long).unsqueeze(0).expand(input_neuron_tokens.shape[0], -1)) # (B, N-K, emb_dim_n_id)
             if self.use_query_neuron_pe:   
                 if self.neuron_pe_mode == "1d":
                     if self.project_query_pe:
@@ -342,7 +366,7 @@ def get_model(args, ds: t.Dict[str, DataLoader], summary: Summary = None) -> Mod
     mouse_id = args.mouse_ids[0]
     batch_size = args.micro_batch_size
     random_input = lambda size: torch.rand(*size)
-    N = list(model.output_shapes.items())[0][1][0]
+    N = list(model.num_output_neurons.items())[0][1][0]
     print("N neurons", N)
     input_data={
         "images": random_input((batch_size, *model.input_shape)),
@@ -377,7 +401,7 @@ def get_model(args, ds: t.Dict[str, DataLoader], summary: Summary = None) -> Mod
         model=model.core,
         input_data={
             "image_tokens": random_input((batch_size, *model.patch_embedding.output_shape)),
-            "neuron_tokens": random_input((batch_size, *model.input_neuron_embedding.output_shape)),
+            "neuron_tokens": random_input((batch_size, *model.input_neuron_embedding.output_shapes[mouse_id])),
             "behaviors": random_input((batch_size, 3)),
             "pupil_centers": random_input((batch_size, 2)),
         },

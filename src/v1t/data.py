@@ -61,6 +61,7 @@ def get_mouse_ids(args):
                     # mouse S0 does not have behavioral data
                     args.mouse_ids.remove("S0")
             for mouse_id in args.mouse_ids:
+                print(mouse_id)
                 assert mouse_id in all_animals
         case "franke2022":
             all_animals = list(FRANKE2022.keys())
@@ -484,7 +485,7 @@ def get_training_ds(
     Args:
         args
         data_dir: str, path to directory where the zip files are stored
-        mouse_ids: t.List[int], mouse IDs to extract
+        mouse_ids: t.List[str], mouse IDs to extract
         batch_size: int, batch size of the DataLoaders
         device: torch.device, the device where the data is being loaded to
     Return:
@@ -506,7 +507,7 @@ def get_training_ds(
 
     # a dictionary of DataLoader for each train, validation and test set
     train_ds, val_ds, test_ds = {}, {}, {}
-    args.output_shapes = {}
+    args.num_output_neurons = {}
 
     for mouse_id in mouse_ids:
         train_ds[mouse_id] = DataLoader(
@@ -525,7 +526,7 @@ def get_training_ds(
             collate_fn=partial(collate_with_neuron_ids, tokenize_neurons=args.tokenize_neurons, frac_input_neurons=args.frac_input_neurons),
             **dataloader_kwargs,
         )
-        args.output_shapes[mouse_id] = (train_ds[mouse_id].dataset.num_neurons,)
+        args.num_output_neurons[mouse_id] = (train_ds[mouse_id].dataset.num_neurons,)
 
     args.input_shape = train_ds[mouse_ids[0]].dataset.image_shape
 

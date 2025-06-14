@@ -297,6 +297,11 @@ def main(args, wandb_sweep: bool = False):
             )
         early_stop = scheduler.step(val_result["single_trial_correlation"], epoch=epoch)
         if args.use_wandb:
+            lr_dict = {
+            f"lr/{group['name']}": group["lr"]
+            for group in optimizer.param_groups
+            }
+            print("Logging LRs:", lr_dict)
             wandb.log(
                 {
                     "train_loss": train_result["loss"],
@@ -304,6 +309,7 @@ def main(args, wandb_sweep: bool = False):
                     "val_corr": val_result["single_trial_correlation"],
                     "best_corr": scheduler.best_value,
                     "elapse": elapse,
+                    **lr_dict,
                 },
                 step=epoch,
             )
