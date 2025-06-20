@@ -465,6 +465,18 @@ if __name__ == "__main__":
         help="use deterministic algorithms in PyTorch",
     )
 
+    # scheduler settings
+    parser.add_argument("--scheduler_type", type=str, default="manual_reduce_on_plateau", choices=["cosine", "manual_reduce_on_plateau"])
+    parser.add_argument("--max_reduce", type=int, default=2,
+        help="maximum number of learning rate reductions before terminating early stopping.",
+    )
+    parser.add_argument("--lr_patience", type=int, default=10, help="number of epochs to wait before reducing the learning rate.")
+    parser.add_argument("--factor", type=float, default=0.3, help="learning rate reduction factor.")
+    parser.add_argument("--min_epochs", type=int, default=0, help="minimum number of epochs to train before early stopping starts monitoring.")
+    parser.add_argument("--eta_min", type=float,default=1e-6,
+        help="minimum learning rate for the cosine scheduler.",
+    )
+
     # optimizer settings
     parser.add_argument("--weight_decay", type=float, default=0.0, help="weight decay for the optimizer.")
     parser.add_argument("--adam_beta1", type=float, default=0.9)
@@ -548,44 +560,60 @@ if __name__ == "__main__":
         "3 - shift input to both core and readout module"
         "4 - shift_mode=3 and provide both behavior and pupil center to cropper",
     )
+
     parser.add_argument("--tokenize_neurons", action="store_true")
     parser.add_argument("--emb_dim_image", type=int, default=156)
+
+    # positional embeddings settings for image tokens or image-related tokens of the core's output
     parser.add_argument(
         "--pe_before_SA", 
         type=str, 
         default="2d", 
         choices=["1d", "2d", "both"], 
     )
-    parser.add_argument("--learned_pe_before_SA", action="store_true")
+    parser.add_argument(
+        "--learned_pe_before_SA", 
+        action="store_true"
+    )
     parser.add_argument(
         "--pe_before_core",
         type=str, 
         default="2d", 
         choices=["1d", "2d", "both"], 
     )
-    parser.add_argument("--learned_pe_before_core", action="store_true")
-    parser.add_argument("--use_pe_after_core", action="store_true")
+    parser.add_argument(
+        "--learned_pe_before_core", 
+        action="store_true"
+    )
+    parser.add_argument(
+        "--use_pe_after_core", 
+        action="store_true",
+    )
     parser.add_argument(
         "--pe_after_core",         
         type=str, 
         default="2d", 
         choices=["1d", "2d", "none"], 
     )
-    parser.add_argument("--learned_pe_after_core", action="store_true")
-
+    parser.add_argument(
+        "--learned_pe_after_core", 
+        action="store_true"
+    )
+    parser.add_argument("--self_attend_image_tokens", action="store_true", help="use self-attention on image tokens before the core module.")
     
 
     temp_args = parser.parse_known_args()[0]
 
     if temp_args.tokenize_neurons:
         parser.add_argument("--emb_dim_n_id", type=int, default=160)
-        parser.add_argument("--emb_dim_n_response", type=int, default=150)
+        parser.add_argument("--emb_dim_n_response", type=int, default=152)
         parser.add_argument("--frac_input_neurons", type=float, default=0.0)
         parser.add_argument("--num_samples_per_token", type=int, default=1)
         parser.add_argument("--num_modes", type=int, default=2)
         parser.add_argument("--use_input_neuron_pe", action="store_true")
         parser.add_argument("--use_query_neuron_pe", action="store_true")
         parser.add_argument("--neuron_pe_mode", type=str, default="coord", choices=["1d", "coord", "both"])
+        parser.add_argument("--self_attend_input_neurons", action="store_true", help="use self-attention on input neurons before the core module.")
         # parser.add_argument("--query_neuron_pe_mode", type=str, default="coord", choices=["1d", "coord"])
         parser.add_argument("--use_mode_emb", action="store_true", help="use mode embedding on image & neuron tokens in the core.")
 

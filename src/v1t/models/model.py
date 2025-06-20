@@ -14,6 +14,7 @@ from v1t.models.neuron_processing import NeuronIDTokenizer
 from v1t.models.neuron_processing import SimpleResponsesTokenizer 
 from v1t.models.image_processing import Image2Patches
 from v1t.models.layers import PositionalEncoding
+from v1t.models.layers import PreCoreAttention
 from v1t.utils.tensorboard import Summary
 from v1t.models.core_shifter import CoreShifters
 from v1t.models.image_cropper import ImageCropper
@@ -63,6 +64,8 @@ class Model(nn.Module):
         print("num_output_neurons", self.num_output_neurons)
         self.shift_mode = args.shift_mode
         self.readout_type = args.readout
+        self.self_attend_image_tokens = args.self_attend_image_tokens
+        self.self_attend_input_neurons = args.self_attend_input_neurons
         self.use_pe_after_core = args.use_pe_after_core
         self.pe_after_core = args.pe_after_core
         self.use_input_neuron_pe = args.use_input_neuron_pe
@@ -94,6 +97,16 @@ class Model(nn.Module):
             learned = args.learned_pe_before_core,
             pe_mode=args.pe_before_core,
         )
+
+        if self.self_attend_image_tokens:
+            self.image_tokens_attention = PreCoreAttention(
+                emb_dim=args.emb_dim_image,
+                num_heads=args.num_heads,
+                dropout=args.p_dropout,
+                grad_checkpointing=args.grad_checkpointing,
+                use_flash_attention=args.amp,
+            )
+        
         self.input_neuron_embedding = SimpleResponsesTokenizer(
             args,
             num_output_neurons=args.num_output_neurons,
@@ -112,6 +125,15 @@ class Model(nn.Module):
                 )
         if self.neuron_pe_mode in ("coord", "both"):
             self.neuron_coord_pe = nn.Linear(3, args.emb_dim_n_response)
+
+        if self.self_attend_input_neurons:
+            self.input_neurons_attention = PreCoreAttention(
+                emb_dim=args.emb_dim_n_response,
+                num_heads=args.num_heads,
+                dropout=args.p_dropout,
+                grad_checkpointing=args.grad_checkpointing,
+                use_flash_attention=args.amp,
+            )
 
         self.project_query_pe = args.emb_dim_n_response != args.emb_dim_n_id
         if self.project_query_pe:
@@ -199,6 +221,14 @@ class Model(nn.Module):
                     }
                 )
             
+            if self.self_attend_input_neurons:
+                params.append(
+                    {
+                        "params": self.input_neurons_attention.parameters(),
+                        "name": "input_neurons_attention",
+                    }
+                )
+            
         params.append(
             {
                 "params": self.patch_embedding.parameters(),
@@ -228,6 +258,14 @@ class Model(nn.Module):
                     "name": "image_cropper",
                 }
             )
+        if self.self_attend_image_tokens:
+            params.append(
+                {
+                    "params": self.image_tokens_attention.parameters(),
+                    "name": "image_tokens_attention",
+                }
+            )
+
         if self.core_shifter is not None:
             params.append(
                 {
@@ -272,6 +310,7 @@ class Model(nn.Module):
         input_neuron_ids: torch.Tensor = None,
         query_neuron_ids: torch.Tensor = None,
         neuron_coords: torch.Tensor = None,
+        save_input_neuron_scores: bool = False,
         activate: bool = True,
     ):
         images, image_grids = self.image_cropper(
@@ -282,6 +321,8 @@ class Model(nn.Module):
         )
 
         image_tokens = self.patch_embedding(images) 
+        if self.self_attend_image_tokens:
+            image_tokens = self.image_tokens_attention(image_tokens)
 
         if self.frac_input_neurons > 0:
             # add time dimension for image responses
@@ -306,6 +347,20 @@ class Model(nn.Module):
                     input_neuron_tokens += (self.neuron_pe(responses)[:, input_neuron_ids, :] + self.neuron_coord_pe(input_coords))
         else:
             input_neuron_tokens = None
+        
+        if self.self_attend_input_neurons:
+            input_neuron_tokens = self.input_neurons_attention(input_neuron_tokens, save_scores=save_input_neuron_scores)  # (B, K, emb_dim_n_response)
+            if self.use_input_neuron_pe:
+                if self.neuron_pe_mode == "1d":
+                    # print(self.neuron_pe(responses).shape)
+                    # print(self.neuron_pe(responses)[:, input_neuron_ids, :].shape)
+                    input_neuron_tokens += self.neuron_pe(responses)[:, input_neuron_ids, :]
+                elif self.neuron_pe_mode == "coord":
+                    input_coords = neuron_coords[:, input_neuron_ids, :]    # (B, K, 3)
+                    input_neuron_tokens += self.neuron_coord_pe(input_coords) #[:, input_neuron_ids.to(torch.long), :]
+                elif self.neuron_pe_mode == "both":
+                    input_coords = neuron_coords[:, input_neuron_ids, :]  
+                    input_neuron_tokens += (self.neuron_pe(responses)[:, input_neuron_ids, :] + self.neuron_coord_pe(input_coords))
 
         outputs = self.core(    # (B, num_tokens, num_channels)
             image_tokens=image_tokens,

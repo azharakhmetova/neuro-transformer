@@ -1,43 +1,24 @@
-
 import torch
 import numpy as np
 import typing as t
 from torch import nn
 from torch.nn import functional as F
+from torch.utils.data import DataLoader
 from einops.layers.torch import Rearrange
-from einops import rearrange, einsum
+from einops import rearrange, repeat, einsum
 from torch.utils.checkpoint import checkpoint
+from torch.nn import functional as F
 from torch.nn.attention import SDPBackend, sdpa_kernel
 import warnings
 
-def scaled_dot_product_attention(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, dropout: float=0.0, use_flash_attention: bool = False):
-    """ 
-    q: [B, H, N, D_head]
-    k, v: [B, H, S, D_head]
-    """
-    if q.device.type == "cuda" and use_flash_attention:
-        # Dispatch through FlashAttention (or fall back) via PyTorch’s 
-        # print("Using FlashAttention")
-        with sdpa_kernel([SDPBackend.FLASH_ATTENTION]):
-            out = F.scaled_dot_product_attention(
-                q, k, v,
-                attn_mask=None,
-                dropout_p=dropout,
-                is_causal=False
-            )
-    else:
-        # print("Using standard attention")
-        out = F.scaled_dot_product_attention(
-            q, k, v,
-            attn_mask=None,
-            dropout_p=dropout,
-            is_causal=False
-        )            
-    # out shape is [B, H, N, D_head]
-    return out
+from v1t.models.layers import scaled_dot_product_attention
+from v1t.models.utils import DropPath
 
-
-class PreCoreAttention(nn.Module):
+REDUCTIONS = t.Literal["sum", "mean", None]
+"""
+code reference: https://github.com/KonstantinWilleke/neuralpredictors/blob/4ef51533f948970e511ee6061711db25e5e52217/neuralpredictors/layers/attention_readout.py
+"""
+class InputNeuronsAttention(nn.Module):
     def __init__(
         self,
         emb_dim: int,
@@ -48,7 +29,7 @@ class PreCoreAttention(nn.Module):
         scale: bool = False,
         use_flash_attention: bool = False,
     ):
-        super(PreCoreAttention, self).__init__()
+        super(InputNeuronsAttention, self).__init__()
 
         self.grad_checkpointing = grad_checkpointing
         self.use_flash_attention = use_flash_attention
@@ -107,26 +88,3 @@ class PreCoreAttention(nn.Module):
         return outputs
 
 
-
-
-    # def scaled_dot_product_attention(self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor):
-    #     """ 
-    #     q: [B, H, N, D_head]
-    #     k, v: [B, H, S, D_head]
-    #     """
-    #     if q.device.type == "cuda" and self.use_flash_attention: #and q.dtype in (torch.float16,torch.bfloat16):
-    #         with sdpa_kernel([SDPBackend.FLASH_ATTENTION]):
-    #             return F.scaled_dot_product_attention(
-    #                 q, k, v,
-    #                 attn_mask=self.mask,
-    #                 dropout_p=self.dropout.p,
-    #                 is_causal=False,
-    #             )
-    #     else:
-    #         # print("Using standard attention in core")
-    #         return F.scaled_dot_product_attention(
-    #         q, k, v,
-    #         attn_mask=self.mask,
-    #         dropout_p=self.dropout.p,
-    #         is_causal=False,
-    #         )
