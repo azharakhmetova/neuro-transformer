@@ -106,6 +106,85 @@ class PreCoreAttention(nn.Module):
             outputs = self.mha(tokens, save_scores=save_scores)
         return outputs
 
+class PreCoreTransformer(nn.Module):
+    def __init__(
+        self,
+        num_tokens: int,
+        emb_dim: int,
+        num_blocks: int,
+        num_heads: int,
+        mlp_dim: int,
+        dropout: float,
+        behavior_mode: int,
+        mouse_ids: t.List[str],
+        use_flash_attention: bool = False,
+        use_lsa: bool = False,
+        drop_path: float = 0.0,
+        use_bias: bool = True,
+        grad_checkpointing: bool = False,
+    ):
+        super(Transformer, self).__init__()
+        self.blocks = nn.ModuleList([])
+        for i in range(num_blocks):
+            block = nn.ModuleDict(
+                {
+                    "mha": Attention(
+                        num_tokens=num_tokens,
+                        emb_dim=emb_dim,
+                        num_heads=num_heads,
+                        dropout=dropout,
+                        use_flash_attention=use_flash_attention,
+                        use_lsa=use_lsa,
+                        use_bias=use_bias,
+                        grad_checkpointing=grad_checkpointing,
+                    ),
+                    "mlp": MLP(
+                        in_dim=emb_dim,
+                        hidden_dim=mlp_dim,
+                        dropout=dropout,
+                        use_bias=use_bias,
+                    ),
+                }
+            )
+            if behavior_mode in (2, 3, 4):
+                block["b-mlp"] = BehaviorMLP(
+                    behavior_mode=behavior_mode,
+                    out_dim=emb_dim,
+                    mouse_ids=mouse_ids,
+                    use_bias=use_bias,
+                )
+            self.blocks.append(block)
+        self.drop_path = DropPath(dropout=drop_path)
+        self.output_shape = (num_tokens, emb_dim) # (num_tokens, emb_dim)
+        self.apply(self.init_weight)
+
+    @staticmethod
+    def init_weight(m: nn.Module):
+        if isinstance(m, nn.Linear):
+            nn.init.trunc_normal_(m.weight, std=0.02)
+            if m.bias is not None:
+                nn.init.constant_(m.bias, 0)
+        elif isinstance(m, nn.LayerNorm):
+            nn.init.constant_(m.bias, 0)
+            nn.init.constant_(m.weight, 1.0)
+
+    def forward(
+        self,
+        inputs: torch.Tensor,
+        mouse_id: str,
+        behaviors: torch.Tensor,
+    ):
+        outputs = inputs
+        for block in self.blocks:
+            if "b-mlp" in block:
+                b_latent = block["b-mlp"](behaviors, mouse_id=mouse_id)
+                b_latent = repeat(b_latent, "b d -> b 1 d")
+                outputs = outputs + b_latent
+            outputs = self.drop_path(block["mha"](outputs)) + outputs
+            outputs = self.drop_path(block["mlp"](outputs)) + outputs
+        # outputs: (1, num_tokens, emb_dim)
+        return outputs
+
 
 
 

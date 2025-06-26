@@ -35,7 +35,7 @@ class CrossAttention(nn.Module):
         key_embedding: bool = False,
         value_embedding: bool = False,
         use_layer_norm: bool = False,
-        use_pos_embedding: bool = True,
+        use_pos_embedding: bool = False,
         use_flash_attention: bool = False,
         temperature: tuple = (False, 1.0)
     ):
