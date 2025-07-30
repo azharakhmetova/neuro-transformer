@@ -8,7 +8,7 @@ from tqdm import tqdm
 from time import time
 from shutil import rmtree
 from torch.utils.data import DataLoader
-from torch.cuda.amp import autocast, GradScaler
+from torch.amp import autocast, GradScaler
 
 from v1t import losses, data
 from v1t.utils.logger import Logger
@@ -54,10 +54,15 @@ def train_step(
     batch_size = batch["image"].size(0)
     result = {"loss/loss": [], "loss/reg_loss": [], "loss/total_loss": []}
     for micro_batch in data.micro_batching(batch, micro_batch_size):
-        with autocast(enabled=scaler.is_enabled(), dtype=torch.float16):
+        with autocast(device_type=device.type, enabled=scaler.is_enabled(), dtype=torch.float16):
             y_true = micro_batch["response"].to(device)
+            y_true = y_true[:, micro_batch["query_neuron_ids"]]
             y_pred, _, _ = model(
-                inputs=micro_batch["image"].to(device),
+                images=micro_batch["image"].to(device),
+                responses=micro_batch["response"].to(device),
+                neuron_coords=micro_batch["neuron_coordinates"].to(device),
+                input_neuron_ids=micro_batch["input_neuron_ids"].to(device),
+                query_neuron_ids=micro_batch["query_neuron_ids"].to(device),
                 mouse_id=mouse_id,
                 behaviors=micro_batch["behavior"].to(device),
                 pupil_centers=micro_batch["pupil_center"].to(device),
@@ -131,10 +136,15 @@ def validation_step(
     result = {"loss/loss": [], "loss/reg_loss": [], "loss/total_loss": []}
     targets, predictions = [], []
     for micro_batch in data.micro_batching(batch, micro_batch_size):
-        with autocast(enabled=scaler.is_enabled(), dtype=torch.float16):
+        with autocast(device_type=device.type, enabled=scaler.is_enabled(), dtype=torch.float16):
             y_true = micro_batch["response"].to(device)
+            y_true = y_true[:, micro_batch["query_neuron_ids"]]
             y_pred, _, _ = model(
-                inputs=micro_batch["image"].to(device),
+                images=micro_batch["image"].to(device),
+                responses=micro_batch["response"].to(device),
+                neuron_coords=micro_batch["neuron_coordinates"].to(device),
+                input_neuron_ids=micro_batch["input_neuron_ids"].to(device),
+                query_neuron_ids=micro_batch["query_neuron_ids"].to(device),
                 mouse_id=mouse_id,
                 behaviors=micro_batch["behavior"].to(device),
                 pupil_centers=micro_batch["pupil_center"].to(device),
@@ -201,7 +211,8 @@ def main(args, wandb_sweep: bool = False):
     utils.set_random_seed(args.seed, deterministic=args.deterministic)
 
     data.get_mouse_ids(args)
-    utils.compute_micro_batch_size(args)
+    # if not args.amp:
+    #     utils.compute_micro_batch_size(args)
 
     train_ds, val_ds, test_ds = data.get_training_ds(
         args,
@@ -219,7 +230,7 @@ def main(args, wandb_sweep: bool = False):
         lr=args.lr,
         betas=(args.adam_beta1, args.adam_beta2),
         eps=args.adam_eps,
-        weight_decay=0,
+        weight_decay=args.weight_decay,
     )
     criterion = losses.get_criterion(args, ds=train_ds)
     scaler = GradScaler(enabled=args.amp)
@@ -238,7 +249,7 @@ def main(args, wandb_sweep: bool = False):
     if args.backend is not None:
         model = utils.compile(args, model=model)
 
-    utils.plot_samples(args, model=model, ds=train_ds, summary=summary, epoch=epoch)
+    # utils.plot_samples(args, model=model, ds=train_ds, summary=summary, epoch=epoch)
 
     while (epoch := epoch + 1) < args.epochs + 1:
         if args.verbose:
@@ -402,10 +413,22 @@ if __name__ == "__main__":
         "automatically increase micro batch size until OOM.",
     )
     parser.add_argument(
+        "--start_micro_batch_size",
+        type=int,
+        default=1,
+        help="starting micro batch size.",
+    )
+    parser.add_argument(
+        "--micro_batch_step_size",
+        type=int,
+        default=8,
+        help="step size to choose the micro batch size that fits into memory.",
+    )
+    parser.add_argument(
         "--device",
         type=str,
         default="",
-        choices=["cpu", "cuda", "mps"],
+        choices=["cpu", "cuda", "cuda:0", "cuda:1", "cuda:2", "cuda:3", "cuda:4", "cuda:5", "cuda:6", "cuda:7", "mps"],
         help="Device to use for computation. "
         "Use the best available device if --device is not specified.",
     )
@@ -437,8 +460,9 @@ if __name__ == "__main__":
     )
 
     # optimizer settings
+    parser.add_argument("--weight_decay", type=float, default=0.0, help="weight decay for the optimizer.")
     parser.add_argument("--adam_beta1", type=float, default=0.9)
-    parser.add_argument("--adam_beta2", type=float, default=0.9999)
+    parser.add_argument("--adam_beta2", type=float, default=0.999) # was 0.9999 10.06.25 12:43
     parser.add_argument("--adam_eps", type=float, default=1e-8)
     parser.add_argument(
         "--criterion",
@@ -482,6 +506,7 @@ if __name__ == "__main__":
 
     # wandb settings
     parser.add_argument("--use_wandb", action="store_true")
+    parser.add_argument("--wandb_project", type=str, default="sensorium")
     parser.add_argument("--wandb_group", type=str, default="")
 
     # misc
@@ -508,7 +533,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--shift_mode",
         type=int,
-        default=2,
+        default=0,
         choices=[0, 1, 2, 3, 4],
         help="shift mode: "
         "0 - disable shifter, "
@@ -517,8 +542,46 @@ if __name__ == "__main__":
         "3 - shift input to both core and readout module"
         "4 - shift_mode=3 and provide both behavior and pupil center to cropper",
     )
+    parser.add_argument("--tokenize_neurons", action="store_true")
+    parser.add_argument("--emb_dim_image", type=int, default=156)
+    parser.add_argument(
+        "--pe_before_SA", 
+        type=str, 
+        default="2d", 
+        choices=["1d", "2d", "both"], 
+    )
+    parser.add_argument("--learned_pe_before_SA", action="store_true")
+    parser.add_argument(
+        "--pe_before_core",
+        type=str, 
+        default="2d", 
+        choices=["1d", "2d", "both"], 
+    )
+    parser.add_argument("--learned_pe_before_core", action="store_true")
+    parser.add_argument("--use_pe_after_core", action="store_true")
+    parser.add_argument(
+        "--pe_after_core",         
+        type=str, 
+        default="2d", 
+        choices=["1d", "2d", "none"], 
+    )
+    parser.add_argument("--learned_pe_after_core", action="store_true")
+
+    
 
     temp_args = parser.parse_known_args()[0]
+
+    if temp_args.tokenize_neurons:
+        parser.add_argument("--emb_dim_n_id", type=int, default=160)
+        parser.add_argument("--emb_dim_n_response", type=int, default=150)
+        parser.add_argument("--frac_input_neurons", type=float, default=0.0)
+        parser.add_argument("--num_samples_per_token", type=int, default=1)
+        parser.add_argument("--num_modes", type=int, default=2)
+        parser.add_argument("--use_input_neuron_pe", action="store_true")
+        parser.add_argument("--use_query_neuron_pe", action="store_true")
+        parser.add_argument("--neuron_pe_mode", type=str, default="coord", choices=["1d", "coord", "both"])
+        # parser.add_argument("--query_neuron_pe_mode", type=str, default="coord", choices=["1d", "coord"])
+        parser.add_argument("--use_mode_emb", action="store_true", help="use mode embedding on image & neuron tokens in the core.")
 
     # hyper-parameters for core module
     match temp_args.core:
@@ -560,7 +623,7 @@ if __name__ == "__main__":
             )
             parser.add_argument("--num_blocks", type=int, default=4)
             parser.add_argument("--num_heads", type=int, default=4)
-            parser.add_argument("--emb_dim", type=int, default=155)
+            parser.add_argument("--emb_dim_core", type=int, default=156) # 155 -> 156 due to having even number for positional embeddings for visual input
             parser.add_argument("--mlp_dim", type=int, default=488)
             parser.add_argument(
                 "--p_dropout",
@@ -646,6 +709,11 @@ if __name__ == "__main__":
             "2: initialize bias with the mean responses divide by standard deviation",
         )
         parser.add_argument("--readout_reg_scale", type=float, default=0.0076)
+    elif temp_args.readout == "attention":
+        # parser.add_argument("--num_heads", type=int, default=4)
+        parser.add_argument("--emb_dim_r", type=int, default=160)
+        parser.add_argument("--readout_reg_scale", type=float, default=0.0076)
+        parser.add_argument("--dropout", type=float, default=0.2544)
     else:
         parser.add_argument("--readout_reg_scale", type=float, default=0.0)
 

@@ -8,125 +8,11 @@ import torch.nn.functional as F
 from einops.layers.torch import Rearrange
 from einops import rearrange, repeat, einsum
 from torch.utils.checkpoint import checkpoint
+from torch.nn import functional as F
+from torch.nn.attention import SDPBackend, sdpa_kernel
 
 from v1t.models.utils import DropPath
-
-
-class PatchShifting(nn.Module):
-    """Patch shifting for Shifted Patch Tokenization"""
-
-    def __init__(self, patch_size: int):
-        super(PatchShifting, self).__init__()
-        self.shift = int(patch_size * (1 / 2))
-
-    def forward(self, inputs: torch.Tensor):
-        """4 diagonal directions padding"""
-        padded_inputs = F.pad(
-            input=inputs,
-            pad=(self.shift, self.shift, self.shift, self.shift),
-            mode="constant",
-            value=0,
-        )
-        left_upper = padded_inputs[..., : -self.shift * 2, : -self.shift * 2]
-        right_upper = padded_inputs[..., : -self.shift * 2, self.shift * 2 :]
-        left_bottom = padded_inputs[..., self.shift * 2 :, : -self.shift * 2]
-        right_bottom = padded_inputs[..., self.shift * 2 :, self.shift * 2 :]
-        outputs = torch.cat(
-            [inputs, left_upper, right_upper, left_bottom, right_bottom],
-            dim=1,
-        )
-        return outputs
-
-
-class Image2Patches(nn.Module):
-    """
-    patch embedding mode:
-        0 - nn.Unfold to extract patches
-        1 - nn.Conv2D to extract patches
-        2 - Shifted Patch Tokenization https://arxiv.org/abs/2112.13492v1
-        3 - nn.Unfold with Dual PatchNorm https://openreview.net/forum?id=jgMqve6Qhw
-    """
-
-    def __init__(
-        self,
-        image_shape: t.Tuple[int, int, int],
-        patch_mode: int,
-        patch_size: int,
-        stride: int,
-        emb_dim: int,
-        dropout: float = 0.0,
-    ):
-        super(Image2Patches, self).__init__()
-        assert 1 <= stride <= patch_size
-        c, h, w = image_shape
-        self.input_shape = image_shape
-
-        num_patches = self.unfold_dim(h, w, patch_size=patch_size, stride=stride)
-        match patch_mode:
-            case 0:
-                patch_dim = patch_size * patch_size * c
-                self.projection = nn.Sequential(
-                    nn.Unfold(kernel_size=patch_size, stride=stride),
-                    Rearrange("b c l -> b l c"),
-                    nn.Linear(in_features=patch_dim, out_features=emb_dim),
-                )
-            case 1:
-                self.projection = nn.Sequential(
-                    nn.Conv2d(
-                        in_channels=c,
-                        out_channels=emb_dim,
-                        kernel_size=patch_size,
-                        stride=stride,
-                    ),
-                    Rearrange("b c h w -> b (h w) c"),
-                )
-            case 2:
-                patch_dim = patch_size * patch_size * (c + 4)
-                self.projection = nn.Sequential(
-                    PatchShifting(patch_size=patch_size),
-                    nn.Unfold(kernel_size=patch_size, stride=stride),
-                    Rearrange("b c l -> b l c"),
-                    nn.LayerNorm(normalized_shape=patch_dim),
-                    nn.Linear(in_features=patch_dim, out_features=emb_dim),
-                )
-            case 3:
-                patch_dim = patch_size * patch_size * c
-                self.projection = nn.Sequential(
-                    nn.Unfold(kernel_size=patch_size, stride=stride),
-                    Rearrange("b c l -> b l c"),
-                    nn.LayerNorm(normalized_shape=patch_dim),
-                    nn.Linear(in_features=patch_dim, out_features=emb_dim),
-                    nn.LayerNorm(normalized_shape=emb_dim),
-                )
-            case _:
-                raise NotImplementedError(f"--patch_mode {patch_mode} not implemented.")
-        self.cls_token = nn.Parameter(torch.randn(1, 1, emb_dim))
-        num_patches += 1
-        self.pos_embedding = nn.Parameter(torch.randn(num_patches, emb_dim))
-        self.dropout = nn.Dropout(p=dropout)
-        self.num_patches = num_patches
-        self.output_shape = (num_patches, emb_dim)
-
-        self.apply(self.init_weight)
-
-    @staticmethod
-    def unfold_dim(h: int, w: int, patch_size: int, padding: int = 0, stride: int = 1):
-        l = lambda s: math.floor(((s + 2 * padding - patch_size) / stride) + 1)
-        return l(h) * l(w)
-
-    @staticmethod
-    def init_weight(m: nn.Module):
-        if isinstance(m, nn.Conv2d):
-            nn.init.kaiming_normal_(m.weight)
-
-    def forward(self, inputs: torch.Tensor):
-        batch_size = inputs.size(0)
-        patches = self.projection(inputs)
-        cls_tokens = repeat(self.cls_token, "1 1 d -> b 1 d", b=batch_size)
-        outputs = torch.cat((cls_tokens, patches), dim=1)
-        outputs += self.pos_embedding
-        outputs = self.dropout(outputs)
-        return outputs
+from v1t.models.layers import scaled_dot_product_attention
 
 
 class MLP(nn.Module):
@@ -205,16 +91,18 @@ class BehaviorMLP(nn.Module):
 class Attention(nn.Module):
     def __init__(
         self,
-        num_patches: int,
+        num_tokens: int,
         emb_dim: int,
         num_heads: int = 8,
         dropout: float = 0.0,
+        use_flash_attention: bool = False,
         use_lsa: bool = False,
         use_bias: bool = True,
         grad_checkpointing: bool = False,
     ):
         super(Attention, self).__init__()
         self.grad_checkpointing = grad_checkpointing
+        self.use_flash_attention = use_flash_attention
         inner_dim = emb_dim * num_heads
 
         self.layer_norm = nn.LayerNorm(emb_dim)
@@ -237,7 +125,7 @@ class Attention(nn.Module):
                 "scale",
                 param=nn.Parameter(torch.full(size=(num_heads,), fill_value=scale)),
             )
-            diagonal = torch.eye(num_patches, num_patches)
+            diagonal = torch.eye(num_tokens, num_tokens)
             self.register_buffer(
                 "mask",
                 torch.nonzero(diagonal == 1, as_tuple=False),
@@ -250,25 +138,25 @@ class Attention(nn.Module):
             self.mask = None
             self.register_buffer("scale", torch.tensor(scale))
 
-    def scaled_dot_product_attention(
-        self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor
-    ):
-        if self.mask is None:
-            dots = torch.matmul(q, k.transpose(-1, -2)) * self.scale
-        else:
-            scale = repeat(self.scale, "h -> b h 1 1", b=q.size(0))
-            dots = torch.matmul(q, k.transpose(-1, -2)) * scale
-            dots[:, :, self.mask[:, 0], self.mask[:, 1]] = -self.max_value
-        attn = self.attend(dots)
-        attn = self.dropout(attn)
-        outputs = einsum(attn, v, "b h n i, b h i d -> b h n d")
-        return outputs
-
+    # def scaled_dot_product_attention(
+    #     self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor
+    # ):
+    #     if self.mask is None:
+    #         dots = torch.matmul(q, k.transpose(-1, -2)) * self.scale
+    #     else:
+    #         scale = repeat(self.scale, "h -> b h 1 1", b=q.size(0))
+    #         dots = torch.matmul(q, k.transpose(-1, -2)) * scale
+    #         dots[:, :, self.mask[:, 0], self.mask[:, 1]] = -self.max_value
+    #     attn = self.attend(dots)
+    #     attn = self.dropout(attn)
+    #     outputs = einsum(attn, v, "b h n i, b h i d -> b h n d")
+    #     return outputs
+        
     def mha(self, inputs: torch.Tensor):
         inputs = self.layer_norm(inputs)
         q, k, v = torch.chunk(self.to_qkv(inputs), chunks=3, dim=-1)
-        outputs = self.scaled_dot_product_attention(
-            q=self.rearrange(q), k=self.rearrange(k), v=self.rearrange(v)
+        outputs = scaled_dot_product_attention(
+            q=self.rearrange(q), k=self.rearrange(k), v=self.rearrange(v), dropout=self.dropout.p, use_flash_attention=self.use_flash_attention,
         )
         outputs = rearrange(outputs, "b h n d -> b n (h d)")
         outputs = self.projection(outputs)
@@ -287,7 +175,7 @@ class Attention(nn.Module):
 class Transformer(nn.Module):
     def __init__(
         self,
-        input_shape: t.Tuple[int, int],
+        num_tokens: int,
         emb_dim: int,
         num_blocks: int,
         num_heads: int,
@@ -295,6 +183,7 @@ class Transformer(nn.Module):
         dropout: float,
         behavior_mode: int,
         mouse_ids: t.List[str],
+        use_flash_attention: bool = False,
         use_lsa: bool = False,
         drop_path: float = 0.0,
         use_bias: bool = True,
@@ -306,10 +195,11 @@ class Transformer(nn.Module):
             block = nn.ModuleDict(
                 {
                     "mha": Attention(
-                        num_patches=input_shape[0],
+                        num_tokens=num_tokens,
                         emb_dim=emb_dim,
                         num_heads=num_heads,
                         dropout=dropout,
+                        use_flash_attention=use_flash_attention,
                         use_lsa=use_lsa,
                         use_bias=use_bias,
                         grad_checkpointing=grad_checkpointing,
@@ -331,8 +221,7 @@ class Transformer(nn.Module):
                 )
             self.blocks.append(block)
         self.drop_path = DropPath(dropout=drop_path)
-        self.output_shape = (input_shape[0], emb_dim)
-
+        self.output_shape = (num_tokens, emb_dim) # (num_tokens, emb_dim)
         self.apply(self.init_weight)
 
     @staticmethod
@@ -359,6 +248,7 @@ class Transformer(nn.Module):
                 outputs = outputs + b_latent
             outputs = self.drop_path(block["mha"](outputs)) + outputs
             outputs = self.drop_path(block["mlp"](outputs)) + outputs
+        # outputs: (1, num_tokens, emb_dim)
         return outputs
 
 
@@ -367,12 +257,16 @@ class ViTCore(Core):
     def __init__(
         self,
         args,
-        input_shape: t.Tuple[int, int, int],
+        # input_shape: t.Tuple[int, int, int],
+        # image_encoder_output_shape: t.Tuple[int, int],
+        num_image_patches: int,
+        num_neuron_tokens: int,
         name: str = "ViTCore",
     ):
-        super(ViTCore, self).__init__(args, input_shape=input_shape, name=name)
+        super(ViTCore, self).__init__(args, name=name)
         self.register_buffer("reg_scale", torch.tensor(args.core_reg_scale))
         self.behavior_mode = args.behavior_mode
+        self.use_mode_emb = args.use_mode_emb
 
         if not hasattr(args, "grad_checkpointing"):
             args.grad_checkpointing = False
@@ -381,32 +275,50 @@ class ViTCore(Core):
         if args.grad_checkpointing and args.verbose:
             print(f"Enable gradient checkpointing in ViT")
 
-        self.patch_embedding = Image2Patches(
-            image_shape=input_shape,
-            patch_mode=args.patch_mode,
-            patch_size=args.patch_size,
-            stride=args.patch_stride,
-            emb_dim=args.emb_dim,
-            dropout=args.p_dropout,
-        )
+        self.readout = args.readout
+
+        # self.patch_embedding = Image2Patches(
+        #     image_shape=input_shape,
+        #     patch_mode=args.patch_mode,
+        #     patch_size=args.patch_size,
+        #     stride=args.patch_stride,
+        #     emb_dim=args.emb_dim_core,
+        #     dropout=args.p_dropout,
+        # )
         self.transformer = Transformer(
-            input_shape=self.patch_embedding.output_shape,
-            emb_dim=args.emb_dim,
+            num_tokens=num_image_patches+num_neuron_tokens,
+            emb_dim=args.emb_dim_core,
             num_blocks=args.num_blocks,
             num_heads=args.num_heads,
             mlp_dim=args.mlp_dim,
             dropout=args.t_dropout,
             behavior_mode=self.behavior_mode,
             mouse_ids=list(args.output_shapes.keys()),
+            use_flash_attention=args.amp,
             use_lsa=args.use_lsa,
             drop_path=args.drop_path,
             use_bias=not args.disable_bias,
             grad_checkpointing=args.grad_checkpointing,
         )
+        self.num_image_patches = num_image_patches
+        self.project_image = args.emb_dim_image != args.emb_dim_core
+        if self.project_image:
+            self.image_projection = nn.Linear(in_features=args.emb_dim_image, out_features=args.emb_dim_core, bias=False)
+        
+        self.project_neuron = args.emb_dim_n_response != args.emb_dim_core
+        if self.project_neuron:
+            self.neuron_projection = nn.Linear(args.emb_dim_n_response, args.emb_dim_core)
+        
+        self.mode_embedding = nn.Embedding(args.num_modes, args.emb_dim_core)
+        # nn.init.constant_(self.embedding.weight, 1.0 / args.emb_dim_core)
+
         # calculate latent height and width based on num_patches
-        h, w = self.find_shape(self.patch_embedding.num_patches - 1)
-        self.rearrange = Rearrange("b (h w) c -> b c h w", h=h, w=w)
-        self.output_shape = (self.transformer.output_shape[-1], h, w)
+        if self.readout == "gaussian2d":
+            h, w = self.find_shape(num_image_patches)
+            self.output_shape = (self.transformer.output_shape[-1], h, w)
+            self.rearrange = Rearrange("b (h w) c -> b c h w", h=h, w=w)
+        else:
+            self.output_shape = (num_image_patches, self.transformer.output_shape[-1]) # self.transformer.output_shape is (num_neuron_tokens+num_iage_tokens, emb_dim)
 
     @staticmethod
     def find_shape(num_patches: int):
@@ -422,15 +334,32 @@ class ViTCore(Core):
 
     def forward(
         self,
-        inputs: torch.Tensor,
+        image_tokens: torch.Tensor, # (B, num_patches, emb_dim_images)
+        neuron_tokens: t.Optional[torch.Tensor], # (B, num_neurons, emb_dim_n_response)
         mouse_id: str,
         behaviors: torch.Tensor,
         pupil_centers: torch.Tensor,
     ):
-        outputs = self.patch_embedding(inputs)
+        if self.project_image:
+            image_tokens = self.image_projection(outputs)
+        
+        if neuron_tokens is not None:
+            if self.project_neuron:
+                neuron_tokens = self.neuron_projection(neuron_tokens)
+            if self.use_mode_emb: 
+                image_mode = torch.zeros_like(image_tokens[..., 0], dtype=torch.long, device=image_tokens.device)
+                neuron_mode = torch.ones_like(neuron_tokens[..., 0], dtype=torch.long, device=neuron_tokens.device)
+                image_tokens += self.mode_embedding(image_mode)
+                neuron_tokens += self.mode_embedding(neuron_mode)
+            outputs = torch.cat((image_tokens, neuron_tokens), dim=1)
+        else:
+            outputs = image_tokens
         if self.behavior_mode in (3, 4):
             behaviors = torch.cat((behaviors, pupil_centers), dim=-1)
         outputs = self.transformer(outputs, mouse_id=mouse_id, behaviors=behaviors)
-        outputs = outputs[:, 1:, :]  # remove CLS token
-        outputs = self.rearrange(outputs)
+        # subselect only image patches because they represent 'receptive fields' of neurons and can be optionally conditioned on input neuron tokens
+        outputs = outputs[:, :self.num_image_patches, :] 
+        # outputs = outputs[:, 1:, :]  # remove CLS token
+        if self.readout == "gaussian2d":
+            outputs = self.rearrange(outputs)
         return outputs

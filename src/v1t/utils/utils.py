@@ -10,6 +10,7 @@ from torch import nn
 from tqdm import tqdm
 from copy import deepcopy
 from torch.utils.data import DataLoader
+from torch.amp import autocast
 
 from v1t.models import Model
 from v1t import losses, data
@@ -29,6 +30,7 @@ def set_random_seed(seed: int, deterministic: bool = False):
     torch.cuda.manual_seed(seed)
     if deterministic:
         torch.backends.cudnn.benchmark = False
+        torch.backends.cudnn.deterministic = True # added 03.06.25
         torch.use_deterministic_algorithms(True)
 
 
@@ -83,16 +85,21 @@ def inference(
     model.train(False)
     for batch in ds:
         for micro_batch in data.micro_batching(batch, batch_size=micro_batch_size):
-            predictions, _, _ = model(
-                inputs=micro_batch["image"].to(device),
-                mouse_id=mouse_id,
-                behaviors=micro_batch["behavior"].to(device),
-                pupil_centers=micro_batch["pupil_center"].to(device),
-            )
-            results["predictions"].append(predictions.cpu())
-            results["targets"].append(micro_batch["response"])
-            results["image_ids"].append(micro_batch["image_id"])
-            results["trial_ids"].append(micro_batch["trial_id"])
+            with autocast(device_type=device.type, dtype=torch.float16):
+                predictions, _, _ = model(
+                    images=micro_batch["image"].to(device),
+                    responses=micro_batch["response"].to(device),
+                    neuron_coords=micro_batch["neuron_coordinates"].to(device),
+                    input_neuron_ids=micro_batch["input_neuron_ids"].to(device),
+                    query_neuron_ids=micro_batch["query_neuron_ids"].to(device),
+                    mouse_id=mouse_id,
+                    behaviors=micro_batch["behavior"].to(device),
+                    pupil_centers=micro_batch["pupil_center"].to(device),
+                )
+                results["predictions"].append(predictions.cpu())
+                results["targets"].append(micro_batch["response"])
+                results["image_ids"].append(micro_batch["image_id"])
+                results["trial_ids"].append(micro_batch["trial_id"])
     results = {
         k: torch.cat(v, dim=0) if isinstance(v[0], torch.Tensor) else v
         for k, v in results.items()
@@ -144,13 +151,10 @@ def evaluate(
 
         mouse_metric = Metrics(ds=mouse_ds, results=outputs[mouse_id])
 
-        results["single_trial_correlation"][
-            mouse_id
-        ] = mouse_metric.single_trial_correlation(per_neuron=True)
+        results["single_trial_correlation"][mouse_id] = mouse_metric.single_trial_correlation(per_neuron=True)
+        
         if mouse_metric.repeat_image and not mouse_metric.hashed:
-            results["correlation_to_average"][
-                mouse_id
-            ] = mouse_metric.correlation_to_average(per_neuron=True)
+            results["correlation_to_average"][mouse_id] = mouse_metric.correlation_to_average(per_neuron=True)
             results["feve"][mouse_id] = mouse_metric.feve(per_neuron=True)
 
         del mouse_metric
@@ -228,29 +232,34 @@ def plot_samples(
         for batch in mouse_ds:
             should_break = False
             for micro_batch in data.micro_batching(batch, args.micro_batch_size):
-                images = micro_batch["image"]
-                predictions, crop_images, image_grids = model(
-                    inputs=images.to(device),
-                    mouse_id=mouse_id,
-                    pupil_centers=micro_batch["pupil_center"].to(device),
-                    behaviors=micro_batch["behavior"].to(device),
-                )
-                images = i_transform_image(images.cpu())
-                crop_images = i_transform_image(crop_images.cpu())
-                image_grids = image_grids.cpu()
-                predictions = predictions.cpu()
+                with autocast(device_type=device.type, dtype=torch.float16):
+                    images = micro_batch["image"]
+                    predictions, crop_images, image_grids = model(
+                        images=images.to(device),
+                        responses=micro_batch["response"].to(device),
+                        neuron_coords=micro_batch["neuron_coordinates"].to(device),
+                        input_neuron_ids=micro_batch["input_neuron_ids"].to(device),
+                        query_neuron_ids=micro_batch["query_neuron_ids"].to(device),
+                        mouse_id=mouse_id,
+                        pupil_centers=micro_batch["pupil_center"].to(device),
+                        behaviors=micro_batch["behavior"].to(device),
+                    )
+                    images = i_transform_image(images.cpu())
+                    crop_images = i_transform_image(crop_images.cpu())
+                    image_grids = image_grids.cpu()
+                    predictions = predictions.cpu()
 
-                results["images"].append(images)
-                results["crop_images"].append(crop_images)
-                results["image_grids"].append(image_grids)
-                results["targets"].append(micro_batch["response"])
-                results["predictions"].append(predictions)
-                results["pupil_center"].append(micro_batch["pupil_center"])
-                results["behaviors"].append(micro_batch["behavior"])
-                results["image_ids"].append(micro_batch["image_id"])
-                should_break = (num_samples := num_samples + len(images)) >= num_plots
-                if should_break:
-                    break
+                    results["images"].append(images)
+                    results["crop_images"].append(crop_images)
+                    results["image_grids"].append(image_grids)
+                    results["targets"].append(micro_batch["response"])
+                    results["predictions"].append(predictions)
+                    results["pupil_center"].append(micro_batch["pupil_center"])
+                    results["behaviors"].append(micro_batch["behavior"])
+                    results["image_ids"].append(micro_batch["image_id"])
+                    should_break = (num_samples := num_samples + len(images)) >= num_plots
+                    if should_break:
+                        break
             if should_break:
                 break
         results = {k: torch.vstack(v) for k, v in results.items()}
@@ -325,8 +334,8 @@ def wandb_init(args, wandb_sweep: bool):
             config.pop("clear_output_dir", None)
             wandb.init(
                 config=config,
-                project="sensorium",
-                entity="bryanlimy",
+                project=args.wandb_project,
+                entity="azharakhmetova-master-thesis",
                 group=args.wandb_group,
                 name=os.path.basename(args.output_dir),
             )
@@ -427,7 +436,7 @@ def compute_micro_batch_size(
     image_shape = args.input_shape
     random_input = lambda size: torch.rand(*size, device=device)
 
-    batch_size, micro_batch_size = args.batch_size, 1
+    batch_size, micro_batch_size = args.batch_size, args.start_micro_batch_size
     while True:
         if micro_batch_size >= batch_size:
             micro_batch_size = batch_size
@@ -439,7 +448,11 @@ def compute_micro_batch_size(
                     batch_loss = 0.0
                     for _ in range(micro_iterations):
                         outputs, _, _ = model(
-                            inputs=random_input((micro_batch_size, *image_shape)),
+                            images=random_input((micro_batch_size, *image_shape)),
+                            responses=random_input((micro_batch_size, list(model.output_shapes.items())[0][1][0])),
+                            neuron_coords=random_input((micro_batch_size, list(model.output_shapes.items())[0][1][0], 3)),
+                            input_neuron_ids=torch.arange(int(args.frac_input_neurons * args.output_shapes[mouse_id][0])).view(-1).to(device),
+                            query_neuron_ids=torch.arange(int(args.frac_input_neurons * args.output_shapes[mouse_id][0]), args.output_shapes[mouse_id][0]).view(-1).to(device),
                             mouse_id=mouse_id,
                             behaviors=random_input((micro_batch_size, 3)),
                             pupil_centers=random_input((micro_batch_size, 2)),
@@ -456,11 +469,14 @@ def compute_micro_batch_size(
                     total_loss.backward()
                 optimizer.step()
                 optimizer.zero_grad()
-            micro_batch_size += 7 if micro_batch_size == 1 else 8
+            micro_batch_size += args.micro_batch_step_size
+            # micro_batch_size += 7 if micro_batch_size == 1 else 8
         except RuntimeError:
             if args.verbose:
                 print(f"OOM at micro batch size {micro_batch_size}")
-            micro_batch_size -= 7 if micro_batch_size == 8 else 8
+             # if we OOM’d right at the start, don’t back off further
+            if micro_batch_size != args.start_micro_batch_size:
+                micro_batch_size -= args.micro_batch_step_size
             break
     del train_ds, model, optimizer, criterion
     torch.cuda.empty_cache()
