@@ -35,7 +35,7 @@ class CrossAttention(nn.Module):
         key_embedding: bool = False,
         value_embedding: bool = False,
         use_layer_norm: bool = False,
-        use_pos_embedding: bool = True,
+        use_pos_embedding: bool = False,
         use_flash_attention: bool = False,
         temperature: tuple = (False, 1.0)
     ):
@@ -70,9 +70,9 @@ class CrossAttention(nn.Module):
 
         # Key/Value projection layer (if enabled)
         if self.key_embedding and self.value_embedding:
-            self.to_kv = nn.Linear(in_features=self.input_shape[1], out_features=self.emb_dim * 2, bias=False)
+            self.to_kv = nn.Linear(in_features=self.input_shape[1], out_features=self.emb_dim * 2, bias=use_bias)
         elif self.key_embedding:
-            self.to_key = nn.Linear(in_features=self.input_shape[1], out_features=self.emb_dim, bias=False)
+            self.to_key = nn.Linear(in_features=self.input_shape[1], out_features=self.emb_dim, bias=use_bias)
 
         # Optional positional embedding
         self.positional_embedding = nn.Parameter(
@@ -187,9 +187,9 @@ class AttentionReadout(Readout):
         # self.neuron_tokenizer = NeuronTokenizer(num_neurons=self.num_neurons, emb_dim=emb_dim)
         self.project_query_neurons = args.emb_dim_r != args.emb_dim_n_id
         if self.project_query_neurons:
-            self.id_query_projection = nn.Linear(in_features=args.emb_dim_n_id, out_features=args.emb_dim_r, bias=False)
+            self.id_query_projection = nn.Linear(in_features=args.emb_dim_n_id, out_features=args.emb_dim_r, bias=use_bias)
 
-        self.neuron_projection = nn.Linear(in_features=args.emb_dim_r, out_features=1, bias=True)
+        self.neuron_projection = nn.Linear(in_features=args.emb_dim_r, out_features=1, bias=use_bias)
     
     def feature_l1(self, reduction: str = "sum"):
         l1 = self.neuron_projection.weight.abs()

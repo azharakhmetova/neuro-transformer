@@ -6,7 +6,7 @@ from torch import nn
 from torch.optim import Optimizer
 from collections import OrderedDict
 from torch.cuda.amp import GradScaler
-
+from torch.optim.lr_scheduler import CosineAnnealingLR
 
 class Scheduler:
     def __init__(
@@ -16,10 +16,6 @@ class Scheduler:
         optimizer: Optimizer = None,
         scaler: GradScaler = None,
         mode: t.Literal["min", "max"] = "max",
-        max_reduce: int = 2,
-        lr_patience: int = 10,
-        factor: float = 0.3,
-        min_epochs: int = 0,
         save_optimizer: bool = True,
         save_scheduler: bool = True,
         module_names: t.List[str] = None,
@@ -53,14 +49,14 @@ class Scheduler:
         self.optimizer = optimizer
         self.scaler = scaler
         self.module_names = module_names
-        self.max_reduce = max_reduce
+        self.max_reduce = args.max_reduce
         self.num_reduce = 0
-        self.lr_patience = lr_patience
+        self.lr_patience = args.lr_patience
         self.lr_wait = 0
-        if factor >= 1.0:
+        if args.factor >= 1.0:
             raise ValueError("Factor should be < 1.0.")
-        self.factor = factor
-        self.min_epochs = min_epochs
+        self.factor = args.factor
+        self.min_epochs = args.min_epochs
         self.best_value = torch.inf if mode == "min" else -torch.inf
         self.checkpoint_dir = os.path.join(args.output_dir, "ckpt")
         if not os.path.isdir(self.checkpoint_dir):
@@ -69,6 +65,12 @@ class Scheduler:
         self.save_scheduler = save_scheduler
         self.device = args.device
         self.verbose = args.verbose
+        self.scheduler_type = args.scheduler_type
+        self.eta_min = args.eta_min
+        
+        self.t_max = args.epochs
+        if self.scheduler_type == "cosine":
+            self.cosine_scheduler = CosineAnnealingLR(self.optimizer, T_max=self.t_max, eta_min=self.eta_min)
 
     def _parameters2save(self):
         state_dict = self.model.state_dict()
@@ -97,6 +99,8 @@ class Scheduler:
                 ckpt["scaler"] = self.scaler.state_dict()
         if self.save_scheduler:
             ckpt["scheduler"] = self.state_dict()
+            if self.scheduler_type == "cosine":
+                ckpt["cosine_scheduler"] = self.cosine_scheduler.state_dict()
         torch.save(ckpt, f=filename)
         if self.verbose:
             print(f"\nCheckpoint saved to {filename}.")
@@ -134,6 +138,8 @@ class Scheduler:
                     self.scaler.load_state_dict(ckpt["scaler"])
             if load_scheduler and "scheduler" in ckpt:
                 self.load_state_dict(ckpt["scheduler"])
+                if self.scheduler_type == "cosine":
+                    self.cosine_scheduler.load_state_dict(ckpt["cosine_scheduler"])
             if self.verbose:
                 print(
                     f"\nLoaded checkpoint from epoch {epoch} "
@@ -172,6 +178,9 @@ class Scheduler:
 
     def step(self, value: t.Union[float, np.ndarray, torch.Tensor], epoch: int):
         terminate = False
+        if self.scheduler_type == "cosine":
+            self.cosine_scheduler.step()
+
         if self.is_better(value):
             self.best_value = value
             self.best_epoch = epoch
@@ -179,19 +188,30 @@ class Scheduler:
             self.num_reduce = 0
             self.save_checkpoint(value=value, epoch=epoch)
         elif epoch > self.min_epochs:
-            if self.lr_wait >= self.lr_patience:
-                if self.num_reduce >= self.max_reduce:
+            if self.scheduler_type == "cosine":
+                if self.lr_wait >= self.lr_patience:
                     terminate = True
                     if self.verbose:
-                        print(
-                            f"\nModel has not improved after {self.num_reduce} "
-                            f"LR reductions."
-                        )
+                            print(
+                                f"\nModel has not improved after {self.num_reduce} "
+                                f"LR reductions."
+                            )
                 else:
-                    self.num_reduce += 1
-                    self.restore()
-                    self.reduce_lr()
-                    self.lr_wait = 0
-            else:
-                self.lr_wait += 1
+                    self.lr_wait += 1
+            elif self.scheduler_type == "manual_reduce_on_plateau":
+                if self.lr_wait >= self.lr_patience:
+                    if self.num_reduce >= self.max_reduce:
+                        terminate = True
+                        if self.verbose:
+                            print(
+                                f"\nModel has not improved after {self.num_reduce} "
+                                f"LR reductions."
+                            )
+                    else:
+                        self.num_reduce += 1
+                        self.restore()
+                        self.reduce_lr()
+                        self.lr_wait = 0
+                else:
+                    self.lr_wait += 1
         return terminate

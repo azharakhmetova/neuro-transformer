@@ -293,7 +293,7 @@ class ViTCore(Core):
             mlp_dim=args.mlp_dim,
             dropout=args.t_dropout,
             behavior_mode=self.behavior_mode,
-            mouse_ids=list(args.output_shapes.keys()),
+            mouse_ids=list(args.num_output_neurons.keys()),
             use_flash_attention=args.amp,
             use_lsa=args.use_lsa,
             drop_path=args.drop_path,

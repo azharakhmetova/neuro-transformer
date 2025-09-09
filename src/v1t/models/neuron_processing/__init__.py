@@ -1,2 +1,3 @@
 from .tokenization import NeuronIDTokenizer
 from .tokenization import SimpleResponsesTokenizer
+from .pre_core_attention import InputNeuronsAttention
