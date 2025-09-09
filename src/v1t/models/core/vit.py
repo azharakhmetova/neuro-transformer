@@ -98,28 +98,26 @@ class Attention(nn.Module):
         use_flash_attention: bool = False,
         use_lsa: bool = False,
         use_bias: bool = True,
+        use_scale: bool = True,
         grad_checkpointing: bool = False,
     ):
         super(Attention, self).__init__()
         self.grad_checkpointing = grad_checkpointing
         self.use_flash_attention = use_flash_attention
-        inner_dim = emb_dim * num_heads
 
         self.layer_norm = nn.LayerNorm(emb_dim)
 
-        self.to_qkv = nn.Linear(
-            in_features=emb_dim, out_features=inner_dim * 3, bias=False
-        )
+        self.to_qkv = nn.Linear(in_features=emb_dim, out_features=emb_dim * 3, bias=use_bias)
         self.rearrange = Rearrange("b n (h d) -> b h n d", h=num_heads)
         self.attend = nn.Softmax(dim=-1)
         self.dropout = nn.Dropout(p=dropout)
 
-        self.projection = nn.Sequential(
-            nn.Linear(in_features=inner_dim, out_features=emb_dim, bias=use_bias),
-            nn.Dropout(p=dropout),
-        )
+        if use_scale:
+            dim_head = emb_dim // num_heads
+            scale = dim_head ** -0.5
+        else:
+            scale = 1.0
 
-        scale = emb_dim**-0.5
         if use_lsa:
             self.register_parameter(
                 "scale",
@@ -138,20 +136,6 @@ class Attention(nn.Module):
             self.mask = None
             self.register_buffer("scale", torch.tensor(scale))
 
-    # def scaled_dot_product_attention(
-    #     self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor
-    # ):
-    #     if self.mask is None:
-    #         dots = torch.matmul(q, k.transpose(-1, -2)) * self.scale
-    #     else:
-    #         scale = repeat(self.scale, "h -> b h 1 1", b=q.size(0))
-    #         dots = torch.matmul(q, k.transpose(-1, -2)) * scale
-    #         dots[:, :, self.mask[:, 0], self.mask[:, 1]] = -self.max_value
-    #     attn = self.attend(dots)
-    #     attn = self.dropout(attn)
-    #     outputs = einsum(attn, v, "b h n i, b h i d -> b h n d")
-    #     return outputs
-        
     def mha(self, inputs: torch.Tensor):
         inputs = self.layer_norm(inputs)
         q, k, v = torch.chunk(self.to_qkv(inputs), chunks=3, dim=-1)
@@ -159,7 +143,6 @@ class Attention(nn.Module):
             q=self.rearrange(q), k=self.rearrange(k), v=self.rearrange(v), dropout=self.dropout.p, use_flash_attention=self.use_flash_attention,
         )
         outputs = rearrange(outputs, "b h n d -> b n (h d)")
-        outputs = self.projection(outputs)
         return outputs
 
     def forward(self, inputs: torch.Tensor):

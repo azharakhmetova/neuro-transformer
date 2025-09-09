@@ -52,7 +52,6 @@ class PreCoreAttention(nn.Module):
 
         self.grad_checkpointing = grad_checkpointing
         self.use_flash_attention = use_flash_attention
-        self.use_bias = use_bias
 
         self.emb_dim = emb_dim
         self.heads = num_heads
@@ -84,17 +83,15 @@ class PreCoreAttention(nn.Module):
         tokens = self.layer_norm(tokens) # [B, N_input_neurons, emb_dim]
         q, k, v = torch.chunk(self.to_qkv(tokens), chunks=3, dim=-1)
 
-        q = rearrange(q, "b n (h d) -> b h n d", h=self.heads)
-        k = rearrange(k, "b n (h d) -> b h n d", h=self.heads)
-        v = rearrange(v, "b n (h d) -> b h n d", h=self.heads)
-
         if save_scores:
             attn_scores = einsum("b h n d, b h m d -> b h n m", q, k) * self.scale
             attn_scores = self.attend(attn_scores)
             outputs = einsum("b h n m, b h m d -> b h n d", attn_scores, v)
             self.input_neurons_attn_scores.append(attn_scores.detach().cpu())
             
-
+        outputs = scaled_dot_product_attention(
+            q=self.rearrange(q), k=self.rearrange(k), v=self.rearrange(v), dropout=self.dropout.p, use_flash_attention=self.use_flash_attention,
+        )
         outputs = scaled_dot_product_attention(q=q, k=k, v=v, dropout=self.dropout.p, use_flash_attention=self.use_flash_attention)
         outputs = rearrange(outputs, "b h n d -> b n (h d)")
         return outputs
