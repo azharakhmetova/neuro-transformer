@@ -93,19 +93,19 @@ class SimpleResponsesTokenizer(nn.Module):
 
         tok = self.tokenizer(
                 responses.view(B, self.num_input_neurons[mouse_id], self.T, self.samples_per_token)
-            ) # (B, N, T, samples_per_T) -> (B, N, T, emb_dim_n_response)
+            ) # (B, N, T, samples_per_T) -> (B, N, T, emb_dim_input_neurons)
         if self.use_masking:
             tok = torch.where(mask.view(B, self.num_input_neurons[mouse_id], self.T, 1), tok, mask_token)
 
         if self.project_neuron_id:
-            neuron_id_tok = self.neuron_id_token_projection(neuron_id_tokens) # (N, emb_dim_n_response)
+            neuron_id_tok = self.neuron_id_token_projection(neuron_id_tokens) # (N, emb_dim_input_neurons)
             # print("neuron id tokens shape (B, N, emb)", neuron_id_tok.shape)
         else:
             neuron_id_tok = neuron_id_tokens 
         
-        # (N, emb_dim_n_response) -> (B, N, T, emb_dim_n_response)
+        # (N, emb_dim_input_neurons) -> (B, N, T, emb_dim_input_neurons)
         tok = tok + neuron_id_tok.unsqueeze(0).unsqueeze(2).repeat(B, 1, self.T, 1)
 
-        tok = tok.view(tok.shape[0], -1, tok.shape[-1]) # (B, N, T, emb_dim_n_response) -> (B, N*T, emb_dim_n_response)
+        tok = tok.view(tok.shape[0], -1, tok.shape[-1]) # (B, N, T, emb_dim_input_neurons) -> (B, N*T, emb_dim_input_neurons)
         # print("final token shape (B, N, emb)", tok.shape)
         return tok

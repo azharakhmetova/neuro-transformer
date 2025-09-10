@@ -249,7 +249,6 @@ class ViTCore(Core):
         super(ViTCore, self).__init__(args, name=name)
         self.register_buffer("reg_scale", torch.tensor(args.core_reg_scale))
         self.behavior_mode = args.behavior_mode
-        self.use_mode_emb = args.use_mode_emb
 
         if not hasattr(args, "grad_checkpointing"):
             args.grad_checkpointing = False
@@ -288,12 +287,15 @@ class ViTCore(Core):
         if self.project_image:
             self.image_projection = nn.Linear(in_features=args.emb_dim_image, out_features=args.emb_dim_core, bias=False)
         
-        self.project_neuron = args.emb_dim_n_response != args.emb_dim_core
-        if self.project_neuron:
-            self.neuron_projection = nn.Linear(args.emb_dim_n_response, args.emb_dim_core)
-        
-        self.mode_embedding = nn.Embedding(args.num_modes, args.emb_dim_core)
-        # nn.init.constant_(self.embedding.weight, 1.0 / args.emb_dim_core)
+        # self.tokenize_neurons = args.tokenize_neurons
+        if args.tokenize_neurons:
+            self.use_mode_emb = args.use_mode_emb
+            self.mode_embedding = nn.Embedding(args.num_modes, args.emb_dim_core)
+            # nn.init.constant_(self.embedding.weight, 1.0 / args.emb_dim_core)
+            self.project_neuron = args.emb_dim_input_neurons != args.emb_dim_core
+            if self.project_neuron:
+                self.neuron_projection = nn.Linear(args.emb_dim_input_neurons, args.emb_dim_core)
+            
 
         # calculate latent height and width based on num_patches
         if self.readout == "gaussian2d":
@@ -318,7 +320,7 @@ class ViTCore(Core):
     def forward(
         self,
         image_tokens: torch.Tensor, # (B, num_patches, emb_dim_images)
-        neuron_tokens: t.Optional[torch.Tensor], # (B, num_neurons, emb_dim_n_response)
+        neuron_tokens: t.Optional[torch.Tensor], # (B, num_neurons, emb_dim_input_neurons)
         mouse_id: str,
         behaviors: torch.Tensor,
         pupil_centers: torch.Tensor,

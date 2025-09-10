@@ -27,7 +27,10 @@ SENSORIUM = {
     "C": "static23343-5-17-GrayImageNet-94c6ff995dac583098847cfecd43e7b6",
     "D": "static23656-14-22-GrayImageNet-94c6ff995dac583098847cfecd43e7b6",
     "E": "static23964-4-22-GrayImageNet-94c6ff995dac583098847cfecd43e7b6",
-    "1_s3_45": "s3_c2_25_12.5_2_12_2_4_45deg"
+    "b1e7_k_4": "beta1e7_k_4",
+    "b1e7_k_4_strat": "beta1e7_k_4_stratified",
+    "b1e7_poisson_k_4": "beta1e7_poisson_k_4",
+    "b1e7_poisson_k_4_strat": "beta1e7_poisson_k_4_stratified",
 }
 
 FRANKE2022 = {
@@ -457,21 +460,27 @@ class MiceDataset(Dataset):
         data["mouse_id"] = self.mouse_id
         return data
 
-def collate_with_neuron_ids(batch, tokenize_neurons: bool = False, frac_input_neurons: float = 0.5):
+def collate_with_neuron_ids(batch, args):
     batch = default_collate(batch)  # now batch["response"]: (B, N)
-    if tokenize_neurons:
-        B, N = batch["response"].shape
-        K = int(frac_input_neurons * N)
+    B, N = batch["response"].shape
+    if not args.tokenize_neurons:
+        batch["input_neuron_ids"] = None
+        batch["query_neuron_ids"] = None
+        return batch
+    elif args.tokenize_neurons and args.frac_input_neurons == 0.0:
+        batch["input_neuron_ids"] = None
+        batch["query_neuron_ids"] = torch.arange(N).to(batch["response"].device)      
+        return batch
+    else:
+        K = int(args.frac_input_neurons * N)
         perm = torch.randperm(N, device=batch["response"].device)
         batch["input_neuron_ids"] = perm[:K]
         batch["query_neuron_ids"] = perm[K:]
         # if K == N:
         #     batch["input_neuron_ids"] = None
         #     batch["query_neuron_ids"] = perm #torch.arange(N).to(batch["response"].device) 
-    else:
-        batch["input_neuron_ids"] = None
-        batch["query_neuron_ids"] = None       
-    return batch
+        return batch
+        
 
 def get_training_ds(
     args,
@@ -512,18 +521,18 @@ def get_training_ds(
     for mouse_id in mouse_ids:
         train_ds[mouse_id] = DataLoader(
             MiceDataset(args, tier="train", data_dir=data_dir, mouse_id=mouse_id),
-            collate_fn=partial(collate_with_neuron_ids, tokenize_neurons=args.tokenize_neurons, frac_input_neurons=args.frac_input_neurons),
+            collate_fn=partial(collate_with_neuron_ids, args=args),
             shuffle=True,
             **dataloader_kwargs,
         )
         val_ds[mouse_id] = DataLoader(
             MiceDataset(args, tier="validation", data_dir=data_dir, mouse_id=mouse_id),
-            collate_fn=partial(collate_with_neuron_ids, tokenize_neurons=args.tokenize_neurons, frac_input_neurons=args.frac_input_neurons),
+            collate_fn=partial(collate_with_neuron_ids, args=args),
             **dataloader_kwargs,
         )
         test_ds[mouse_id] = DataLoader(
             MiceDataset(args, tier="test", data_dir=data_dir, mouse_id=mouse_id),
-            collate_fn=partial(collate_with_neuron_ids, tokenize_neurons=args.tokenize_neurons, frac_input_neurons=args.frac_input_neurons),
+            collate_fn=partial(collate_with_neuron_ids, args=args),
             **dataloader_kwargs,
         )
         args.num_output_neurons[mouse_id] = (train_ds[mouse_id].dataset.num_neurons,)
@@ -570,7 +579,7 @@ def get_submission_ds(
     for mouse_id in list(args.output_shapes.keys()):
         test_ds[mouse_id] = DataLoader(
             MiceDataset(args, tier="test", data_dir=data_dir, mouse_id=mouse_id),
-            collate_fn=partial(collate_with_neuron_ids, tokenize_neurons=args.tokenize_neurons, frac_input_neurons=args.frac_input_neurons),
+            collate_fn=partial(collate_with_neuron_ids, args=args),
             **test_kwargs,
         )
         if mouse_id in ("S0", "S1"):
@@ -578,7 +587,7 @@ def get_submission_ds(
                 MiceDataset(
                     args, tier="final_test", data_dir=data_dir, mouse_id=mouse_id
                 ),
-                collate_fn=partial(collate_with_neuron_ids, tokenize_neurons=args.tokenize_neurons, frac_input_neurons=args.frac_input_neurons),
+                collate_fn=partial(collate_with_neuron_ids, args=args),
                 **test_kwargs,
             )
 

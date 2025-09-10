@@ -57,12 +57,14 @@ def train_step(
         with autocast(device_type=device.type, enabled=scaler.is_enabled(), dtype=torch.float16):
             y_true = micro_batch["response"].to(device)
             y_true = y_true[:, micro_batch["query_neuron_ids"]]
+            input_neuron_ids = micro_batch["input_neuron_ids"].to(device) if model.frac_input_neurons > 0 else None
+            query_neuron_ids = micro_batch["query_neuron_ids"].to(device) if model.tokenize_neurons else None
             y_pred, _, _ = model(
                 images=micro_batch["image"].to(device),
                 responses=micro_batch["response"].to(device),
                 neuron_coords=micro_batch["neuron_coordinates"].to(device),
-                input_neuron_ids=micro_batch["input_neuron_ids"].to(device),
-                query_neuron_ids=micro_batch["query_neuron_ids"].to(device),
+                input_neuron_ids=input_neuron_ids,
+                query_neuron_ids=query_neuron_ids,
                 mouse_id=mouse_id,
                 behaviors=micro_batch["behavior"].to(device),
                 pupil_centers=micro_batch["pupil_center"].to(device),
@@ -139,12 +141,14 @@ def validation_step(
         with autocast(device_type=device.type, enabled=scaler.is_enabled(), dtype=torch.float16):
             y_true = micro_batch["response"].to(device)
             y_true = y_true[:, micro_batch["query_neuron_ids"]]
+            input_neuron_ids = micro_batch["input_neuron_ids"].to(device) if model.frac_input_neurons > 0 else None
+            query_neuron_ids = micro_batch["query_neuron_ids"].to(device) if model.tokenize_neurons else None
             y_pred, _, _ = model(
                 images=micro_batch["image"].to(device),
                 responses=micro_batch["response"].to(device),
                 neuron_coords=micro_batch["neuron_coordinates"].to(device),
-                input_neuron_ids=micro_batch["input_neuron_ids"].to(device),
-                query_neuron_ids=micro_batch["query_neuron_ids"].to(device),
+                input_neuron_ids=input_neuron_ids,
+                query_neuron_ids=query_neuron_ids,
                 mouse_id=mouse_id,
                 behaviors=micro_batch["behavior"].to(device),
                 pupil_centers=micro_batch["pupil_center"].to(device),
@@ -601,13 +605,12 @@ if __name__ == "__main__":
     )
     parser.add_argument("--self_attend_image_tokens", action="store_true", help="use self-attention on image tokens before the core module.")
     
-
+    parser.add_argument("--frac_input_neurons", type=float, default=0.0)
     temp_args = parser.parse_known_args()[0]
 
     if temp_args.tokenize_neurons:
         parser.add_argument("--emb_dim_n_id", type=int, default=160)
-        parser.add_argument("--emb_dim_n_response", type=int, default=152)
-        parser.add_argument("--frac_input_neurons", type=float, default=0.0)
+        parser.add_argument("--emb_dim_input_neurons", type=int, default=152)
         parser.add_argument("--num_samples_per_token", type=int, default=1)
         parser.add_argument("--num_modes", type=int, default=2)
         parser.add_argument("--use_input_neuron_pe", action="store_true")

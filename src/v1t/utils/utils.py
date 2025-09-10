@@ -86,12 +86,14 @@ def inference(
     for batch in ds:
         for micro_batch in data.micro_batching(batch, batch_size=micro_batch_size):
             with autocast(device_type=device.type, dtype=torch.float16):
+                input_neuron_ids = micro_batch["input_neuron_ids"].to(device) if model.frac_input_neurons > 0 else None
+                query_neuron_ids = micro_batch["query_neuron_ids"].to(device) if model.tokenize_neurons else None
                 predictions, _, _ = model(
                     images=micro_batch["image"].to(device),
                     responses=micro_batch["response"].to(device),
                     neuron_coords=micro_batch["neuron_coordinates"].to(device),
-                    input_neuron_ids=micro_batch["input_neuron_ids"].to(device),
-                    query_neuron_ids=micro_batch["query_neuron_ids"].to(device),
+                    input_neuron_ids=input_neuron_ids,
+                    query_neuron_ids=query_neuron_ids,
                     mouse_id=mouse_id,
                     behaviors=micro_batch["behavior"].to(device),
                     pupil_centers=micro_batch["pupil_center"].to(device),
@@ -234,12 +236,14 @@ def plot_samples(
             for micro_batch in data.micro_batching(batch, args.micro_batch_size):
                 with autocast(device_type=device.type, dtype=torch.float16):
                     images = micro_batch["image"]
+                    input_neuron_ids = micro_batch["input_neuron_ids"].to(device) if model.frac_input_neurons > 0 else None
+                    query_neuron_ids = micro_batch["query_neuron_ids"].to(device) if model.tokenize_neurons else None
                     predictions, crop_images, image_grids = model(
                         images=images.to(device),
                         responses=micro_batch["response"].to(device),
                         neuron_coords=micro_batch["neuron_coordinates"].to(device),
-                        input_neuron_ids=micro_batch["input_neuron_ids"].to(device),
-                        query_neuron_ids=micro_batch["query_neuron_ids"].to(device),
+                        input_neuron_ids=input_neuron_ids,
+                        query_neuron_ids=query_neuron_ids,
                         mouse_id=mouse_id,
                         pupil_centers=micro_batch["pupil_center"].to(device),
                         behaviors=micro_batch["behavior"].to(device),
@@ -451,8 +455,8 @@ def compute_micro_batch_size(
                             images=random_input((micro_batch_size, *image_shape)),
                             responses=random_input((micro_batch_size, list(model.output_shapes.items())[0][1][0])),
                             neuron_coords=random_input((micro_batch_size, list(model.output_shapes.items())[0][1][0], 3)),
-                            input_neuron_ids=torch.arange(int(args.frac_input_neurons * args.output_shapes[mouse_id][0])).view(-1).to(device),
-                            query_neuron_ids=torch.arange(int(args.frac_input_neurons * args.output_shapes[mouse_id][0]), args.output_shapes[mouse_id][0]).view(-1).to(device),
+                            input_neuron_ids=torch.arange(int(args.frac_input_neurons * args.output_shapes[mouse_id][0])).view(-1).to(device) if args.frac_input_neurons > 0.0 else None,
+                            query_neuron_ids=torch.arange(int(args.frac_input_neurons * args.output_shapes[mouse_id][0]), args.output_shapes[mouse_id][0]).view(-1).to(device) if args.tokenize_neurons else None,
                             mouse_id=mouse_id,
                             behaviors=random_input((micro_batch_size, 3)),
                             pupil_centers=random_input((micro_batch_size, 2)),
