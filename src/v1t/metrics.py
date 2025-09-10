@@ -25,7 +25,10 @@ class Metrics:
         self.targets = results["targets"].numpy()
         self.predictions = results["predictions"].numpy()
         self.image_ids = results["image_ids"].numpy()
-        self.neuron_ids = deepcopy(ds.dataset.neuron_ids)
+        if "query_neuron_ids" in results:
+            self.neuron_ids = results["query_neuron_ids"].numpy()
+        else:
+            self.neuron_ids = deepcopy(ds.dataset.neuron_ids) - 1  # make zero-indexed
         self.trial_ids = results["trial_ids"]
         if not self.hashed:
             self.trial_ids = self.trial_ids.numpy()

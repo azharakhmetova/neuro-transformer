@@ -347,6 +347,22 @@ class MiceDataset(Dataset):
             self.gray_scale = True
             self.image_shape = (1,) + self.image_shape[1:]
 
+        self._fixed_perm = None
+
+        # make a fixed perm for non-train tiers (only if we’ll tokenize)
+        if args.tokenize_neurons and args.frac_input_neurons > 0.0 and (self.tier == "test" or self.tier == "final_test"):
+            self._init_fixed_perm(args)
+
+    def _init_fixed_perm(self, args):
+        g = torch.Generator(device="cpu").manual_seed(args.seed)
+        self._fixed_perm = torch.randperm(self.num_neurons, generator=g, device="cpu")
+    
+    def get_fixed_perm(self) -> torch.Tensor:
+        # ensure up-to-date length (in case num_neurons changes)
+        if (self._fixed_perm is None) or (self._fixed_perm.numel() != self.num_neurons):
+            self._init_fixed_perm()
+        return self._fixed_perm
+
     def __len__(self):
         return len(self.indexes)
 
@@ -460,27 +476,38 @@ class MiceDataset(Dataset):
         data["mouse_id"] = self.mouse_id
         return data
 
-def collate_with_neuron_ids(batch, args):
+def collate_with_neuron_ids(batch, args, dataset):
+    fixed = (dataset.tier == "test" or dataset.tier == "final_test") 
+    # def collate(batch):
     batch = default_collate(batch)  # now batch["response"]: (B, N)
     B, N = batch["response"].shape
     if not args.tokenize_neurons:
         batch["input_neuron_ids"] = None
         batch["query_neuron_ids"] = None
         return batch
-    elif args.tokenize_neurons and args.frac_input_neurons == 0.0:
+    
+    if args.tokenize_neurons and args.frac_input_neurons == 0.0:
         batch["input_neuron_ids"] = None
         batch["query_neuron_ids"] = torch.arange(N).to(batch["response"].device)      
         return batch
+    
+    K = int(args.frac_input_neurons * N)
+    if fixed:
+        perm = dataset.get_fixed_perm().to(batch["response"].device)
     else:
-        K = int(args.frac_input_neurons * N)
         perm = torch.randperm(N, device=batch["response"].device)
-        batch["input_neuron_ids"] = perm[:K]
-        batch["query_neuron_ids"] = perm[K:]
-        # if K == N:
-        #     batch["input_neuron_ids"] = None
-        #     batch["query_neuron_ids"] = perm #torch.arange(N).to(batch["response"].device) 
-        return batch
-        
+
+    batch["input_neuron_ids"] = perm[:K]
+    batch["query_neuron_ids"] = perm[K:]
+
+    if args.tokenize_neurons and args.frac_input_neurons > 0:
+        assert not torch.isin(batch["input_neuron_ids"], batch["query_neuron_ids"]).any(), "input ∩ query overlap!"
+    # if K == N:
+    #     batch["input_neuron_ids"] = None
+    #     batch["query_neuron_ids"] = perm #torch.arange(N).to(batch["response"].device) 
+    return batch
+    
+    # return collate
 
 def get_training_ds(
     args,
@@ -519,22 +546,18 @@ def get_training_ds(
     args.num_output_neurons = {}
 
     for mouse_id in mouse_ids:
-        train_ds[mouse_id] = DataLoader(
-            MiceDataset(args, tier="train", data_dir=data_dir, mouse_id=mouse_id),
-            collate_fn=partial(collate_with_neuron_ids, args=args),
-            shuffle=True,
-            **dataloader_kwargs,
-        )
-        val_ds[mouse_id] = DataLoader(
-            MiceDataset(args, tier="validation", data_dir=data_dir, mouse_id=mouse_id),
-            collate_fn=partial(collate_with_neuron_ids, args=args),
-            **dataloader_kwargs,
-        )
-        test_ds[mouse_id] = DataLoader(
-            MiceDataset(args, tier="test", data_dir=data_dir, mouse_id=mouse_id),
-            collate_fn=partial(collate_with_neuron_ids, args=args),
-            **dataloader_kwargs,
-        )
+        train_dataset = MiceDataset(args, tier="train",      data_dir=data_dir, mouse_id=mouse_id)
+        val_dataset   = MiceDataset(args, tier="validation", data_dir=data_dir, mouse_id=mouse_id)
+        test_dataset  = MiceDataset(args, tier="test",       data_dir=data_dir, mouse_id=mouse_id)
+
+        train_collate = partial(collate_with_neuron_ids, args=args, dataset=train_dataset)
+        val_collate   = partial(collate_with_neuron_ids, args=args, dataset=val_dataset)
+        test_collate  = partial(collate_with_neuron_ids, args=args, dataset=test_dataset)
+
+        train_ds[mouse_id] = DataLoader(train_dataset, collate_fn=train_collate, shuffle=True,  **dataloader_kwargs)
+        val_ds[mouse_id]   = DataLoader(val_dataset,   collate_fn=val_collate,   shuffle=False, **dataloader_kwargs)
+        test_ds[mouse_id]  = DataLoader(test_dataset,  collate_fn=test_collate,  shuffle=False, **dataloader_kwargs)
+
         args.num_output_neurons[mouse_id] = (train_ds[mouse_id].dataset.num_neurons,)
 
     args.input_shape = train_ds[mouse_ids[0]].dataset.image_shape
@@ -577,18 +600,14 @@ def get_submission_ds(
     test_ds, final_test_ds = {}, {}
 
     for mouse_id in list(args.output_shapes.keys()):
-        test_ds[mouse_id] = DataLoader(
-            MiceDataset(args, tier="test", data_dir=data_dir, mouse_id=mouse_id),
-            collate_fn=partial(collate_with_neuron_ids, args=args),
-            **test_kwargs,
-        )
+        test_ds = MiceDataset(args, tier="test", data_dir=data_dir, mouse_id=mouse_id)
+        test_collate = partial(collate_with_neuron_ids, args=args, dataset=test_ds)
+        test_ds[mouse_id] = DataLoader(test_ds, collate_fn=test_collate,**test_kwargs)
+
         if mouse_id in ("S0", "S1"):
-            final_test_ds[mouse_id] = DataLoader(
-                MiceDataset(
-                    args, tier="final_test", data_dir=data_dir, mouse_id=mouse_id
-                ),
-                collate_fn=partial(collate_with_neuron_ids, args=args),
-                **test_kwargs,
-            )
+            final_test_ds = MiceDataset(args, tier="final_test", data_dir=data_dir, mouse_id=mouse_id)
+            final_test_collate = partial(collate_with_neuron_ids, args=args, dataset=final_test_ds)
+            final_test_ds[mouse_id] = DataLoader(final_test_ds, collate_fn=final_test_collate, **test_kwargs)
+
 
     return test_ds, final_test_ds

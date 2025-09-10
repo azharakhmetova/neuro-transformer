@@ -106,6 +106,8 @@ def inference(
         k: torch.cat(v, dim=0) if isinstance(v[0], torch.Tensor) else v
         for k, v in results.items()
     }
+    if query_neuron_ids is not None:
+        results["query_neuron_ids"] = query_neuron_ids.cpu()
     return results
 
 
@@ -203,7 +205,6 @@ def evaluate(
         yaml.save(os.path.join(save_result, "evaluation.yaml"), data=results)
 
     return overall_result
-
 
 @torch.no_grad()
 def plot_samples(
