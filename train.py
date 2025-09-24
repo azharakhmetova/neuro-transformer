@@ -687,7 +687,7 @@ if __name__ == "__main__":
                 help="Disable bias terms in linear layers in ViT.",
             )
             parser.add_argument("--core_reg_scale", type=float, default=0.5379)
-            parser.add_argument("--lr", type=float, default=0.001647)
+            parser.add_argument("--lr", type=float, default=0.001647*0.4)
             parser.add_argument("--core_lr", type=float, default=None)
         case "cct":
             parser.add_argument("--patch_size", type=int, default=8)
@@ -720,7 +720,7 @@ if __name__ == "__main__":
                 help="stochastic depth dropout rate",
             )
             parser.add_argument("--core_reg_scale", type=float, default=0.5379)
-            parser.add_argument("--lr", type=float, default=0.001647)
+            parser.add_argument("--lr", type=float, default=0.001647*0.4)
             parser.add_argument("--core_lr", type=float, default=None)
         case "stn":
             parser.add_argument("--num_layers", type=int, default=7)
@@ -739,7 +739,7 @@ if __name__ == "__main__":
         parser.add_argument(
             "--bias_mode",
             type=int,
-            default=0,
+            default=1,
             choices=[0, 1, 2],
             help="Gaussian2d readout bias mode:"
             "0: initialize bias with zeros"
@@ -752,6 +752,16 @@ if __name__ == "__main__":
         parser.add_argument("--emb_dim_r", type=int, default=160)
         parser.add_argument("--readout_reg_scale", type=float, default=0.0076)
         parser.add_argument("--dropout", type=float, default=0.2544)
+        parser.add_argument(
+            "--bias_mode",
+            type=int,
+            default=1,
+            choices=[0, 1, 2],
+            help="Attention readout bias mode:"
+            "0: initialize bias with zeros"
+            "1: initialize bias with the mean responses"
+            "2: initialize bias with the mean responses divide by standard deviation",
+        )
     else:
         parser.add_argument("--readout_reg_scale", type=float, default=0.0)
 

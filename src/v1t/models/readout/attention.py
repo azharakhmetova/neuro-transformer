@@ -53,8 +53,9 @@ class CrossAttention(nn.Module):
         self.emb_dim = emb_dim
         self.heads = num_heads
 
+        
+        dim_head = self.emb_dim // self.heads
         if scale:
-            dim_head = self.emb_dim // self.heads
             self.scale = dim_head ** -0.5
         else:
             self.scale = 1.0
@@ -164,7 +165,8 @@ class AttentionReadout(Readout):
             args, input_shape=input_shape, output_shape=output_shape, ds=ds, name=name
         )
 
-        # emb_dim = 160  # embedding dimension for readout
+        self.use_bias = use_bias
+        self.bias_mode = args.bias_mode
 
         self.cross_attention = CrossAttention(
             input_shape=input_shape,
@@ -187,25 +189,47 @@ class AttentionReadout(Readout):
         # self.neuron_tokenizer = NeuronTokenizer(num_neurons=self.num_neurons, emb_dim=emb_dim)
         self.project_query_neurons = args.emb_dim_r != args.emb_dim_n_id
         if self.project_query_neurons:
-            self.id_query_projection = nn.Linear(in_features=args.emb_dim_n_id, out_features=args.emb_dim_r, bias=use_bias)
+            self.id_query_projection = nn.Linear(in_features=args.emb_dim_n_id, out_features=args.emb_dim_r, bias=True)
 
-        self.neuron_projection = nn.Linear(in_features=args.emb_dim_r, out_features=1, bias=use_bias)
-    
+        self.initialize_bias(stats=ds.dataset.response_stats)
+        self.neuron_projection = nn.Linear(in_features=args.emb_dim_r, out_features=1, bias=True)
+        # if use_bias:
+        #     nn.init.normal_(self.neuron_projection.weight, 0.0, 1e-3)
+
+        self.features = self.embedding = nn.Embedding(self.num_neurons, args.emb_dim_r)
+        nn.init.constant_(self.embedding.weight, 1.0 / args.emb_dim_r)
+
+        r = 20
+        self.U = nn.Linear(args.emb_dim_r, r)
+        self.V = nn.Linear(args.emb_dim_r, r)
+
+    def initialize_bias(self, stats: t.Dict[str, np.ndarray]):
+        if self.use_bias:
+            if self.bias_mode == 0:
+                bias = torch.zeros(size=(len(stats["mean"]),))
+            elif self.bias_mode == 1:
+                bias = torch.from_numpy(stats["mean"])
+            elif self.bias_mode == 2:
+                bias = stats["mean"] / stats["std"]
+                bias = torch.from_numpy(bias)
+            else:
+                raise NotImplementedError(
+                    f"AttentionReadout: bias mode {self.bias_mode} has not been implemented."
+                )
+            self.bias = nn.Parameter(bias)
+        else:
+            self.bias = None
+
     def feature_l1(self, reduction: str = "sum"):
-        l1 = self.neuron_projection.weight.abs()
-        l1 = l1.sum() if reduction == "sum" else l1.mean()
-
-        if self.neuron_projection.bias is not None:
-            bias = self.neuron_projection.bias.abs()
-            l1 += bias.sum() if reduction == "sum" else bias.mean()
-        
+        l1 = self.features.weight.abs()
+        l1 = l1.sum() if reduction == "sum" else l1.mean()        
         return l1
 
     def regularizer(self, reduction: str = "sum"):
         return self.reg_scale * self.feature_l1(reduction=reduction)
 
 
-    def forward(self, inputs: torch.Tensor, query_neurons: t.Optional[torch.Tensor] = None, shifts: t.Optional[torch.Tensor] = None): 
+    def forward(self, inputs: torch.Tensor, query_neurons: t.Optional[torch.Tensor] = None, query_neuron_ids: t.Optional[torch.Tensor] = None, shifts: t.Optional[torch.Tensor] = None): 
         b, t, c = inputs.size()
         # print("readout inputs shape: ", inputs.shape) # (B, num_tokens, num_channels)
         # print("readout query_neurons shape: ", query_neurons.shape)
@@ -227,7 +251,19 @@ class AttentionReadout(Readout):
 
         outputs = self.cross_attention(q=query_neurons, inputs=inputs)
         # outputs = self.dropout(outputs) # [B, N_neurons, emb_dim]
-        outputs = self.neuron_projection(outputs).squeeze(-1)  # [B, N_neurons]
+        # outputs = self.neuron_projection(outputs).squeeze(-1)  # [B, N_neurons]
+
+        outputs = outputs * self.features(query_neuron_ids)
+        outputs = torch.sum(outputs, dim=-1) # [B, N_neurons]
+
+        # outputs = outputs * query_neurons
+        # outputs = torch.sum(outputs, dim=-1) # [B, N_neurons]
+
+        # outputs= (self.U(outputs) * self.V(query_neurons)).sum(-1)
+
+        bias = self.bias
+        if bias is not None:
+            outputs += bias[query_neuron_ids]
         return outputs
 
     

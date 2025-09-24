@@ -312,7 +312,7 @@ class Model(nn.Module):
         reg += self.id_tokenizer_l1(reduction="sum") * 0.0076
         if not self.core.frozen:
             reg += self.core.regularizer()
-        # reg += self.readouts.regularizer(mouse_id=mouse_id)
+        reg += self.readouts.regularizer(mouse_id=mouse_id)
         reg += self.image_cropper.regularizer(mouse_id=mouse_id)
         if self.core_shifter is not None:
             reg += self.core_shifter.regularizer(mouse_id=mouse_id)
@@ -422,7 +422,7 @@ class Model(nn.Module):
                         query_neurons += (self.projection_query_pe(self.neuron_coord_pe(query_coords)) + self.projection_query_pe(self.neuron_pe(responses)[:, query_neuron_ids, :]))
                     else:
                         query_neurons += (self.neuron_coord_pe(query_coords) + self.neuron_pe(responses)[:, query_neuron_ids, :])
-        outputs = self.readouts(outputs, mouse_id=mouse_id, query_neurons=query_neurons, shifts=shifts) # (B, num_neurons)
+        outputs = self.readouts(outputs, mouse_id=mouse_id, query_neurons=query_neurons, query_neuron_ids=query_neuron_ids, shifts=shifts) # (B, num_neurons)
         # print("model readout output shape: ", outputs.shape)
         if activate:
             outputs = self.elu1(outputs)
@@ -494,7 +494,8 @@ def get_model(args, ds: t.Dict[str, DataLoader], summary: Summary = None) -> Mod
         model=model.readouts[mouse_id],
         input_data={
             "inputs": random_input((batch_size, *model.core.output_shape)),
-            "query_neurons": random_input((batch_size, K, args.emb_dim_n_id)),
+            "query_neurons": random_input((batch_size, N-K, args.emb_dim_n_id)),
+            "query_neuron_ids": input_data["query_neuron_ids"],
             },
         filename=os.path.join(args.output_dir, "model_readout.txt"),
         summary=summary,
