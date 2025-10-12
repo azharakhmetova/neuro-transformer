@@ -3,6 +3,7 @@ import numpy as np
 import typing as t
 from torch.utils.data import DataLoader
 from torch.nn.modules.loss import _Loss
+import math
 
 from v1t.models.utils import BufferDict
 
@@ -39,6 +40,34 @@ def poisson_loss(
     loss = torch.sum(loss, dim=-1)  # sum over neurons
     return torch.sum(loss) if reduction == "sum" else torch.mean(loss)
 
+# code adapted from https://github.com/neurallatents/nlb_tools/blob/1ddc15f45b56388ff093d1396b7b87b36fa32a68/nlb_tools/evaluation.py#L252
+def bits_per_spike(
+    y_true: torch.Tensor, # true spikes
+    y_pred: torch.Tensor, # predicted rates
+):
+    """Computes bits per spike of rate predictions given true spikes.
+    Bits per spike is equal to the difference between the log-likelihoods (in base 2)
+    of the rate predictions and the null model (i.e. predicting mean firing rate of each neuron)
+    divided by the total number of spikes.
+
+    Returns
+    -------
+    float
+        Bits per spike of rate predictions
+    """
+    nll_model = poisson_loss(y_true, y_pred)
+    mean_per_neuron = torch.nanmean(y_true, dim=0, keepdim=True)  # (1, N)
+    null_rates = mean_per_neuron.expand_as(y_true)                # (B, N)
+    nll_null = poisson_loss(y_true, null_rates)
+    
+    total_spikes = torch.nansum(y_true)
+    if not torch.is_nonzero(total_spikes):
+        raise ValueError(
+            "bits_per_spike: total_spikes is zero (no observed spikes). "
+            "Metric is undefined; ensure your evaluation window contains spikes."
+        )
+
+    return (nll_null - nll_model) / total_spikes / math.log(2.0)
 
 def _t_correlation(
     y1: torch.Tensor,

@@ -32,10 +32,12 @@ def compute_metrics(y_true: torch.Tensor, y_pred: torch.Tensor):
     poisson_loss = losses.poisson_loss(y_true=y_true, y_pred=y_pred)
     correlation = losses.correlation(y1=y_pred, y2=y_true, dim=0)
     correlation = torch.mean(correlation)
+    bits_per_spike = losses.bits_per_spike(y_true=y_true, y_pred=y_pred)
     return {
         "metrics/msse": msse,
         "metrics/poisson_loss": poisson_loss,
         "metrics/single_trial_correlation": correlation,
+        "metrics/bits_per_spike": bits_per_spike,
     }
 
 

@@ -102,7 +102,7 @@ class CrossAttention(nn.Module):
     #     return outputs
     
 
-    def mha(self, q: torch.Tensor, inputs: torch.Tensor):
+    def mha(self, q: torch.Tensor, inputs: torch.Tensor, output_attn_weights: bool = False):
         q = self.layer_norm(q) # [B, N_query_neurons, emb_dim]
         inputs = self.layer_norm_inputs(inputs) # [B, num_image_tokens, num_channels]
 
@@ -130,13 +130,18 @@ class CrossAttention(nn.Module):
 
         outputs = scaled_dot_product_attention(q=q, k=k, v=v, dropout=self.dropout.p, use_flash_attention=self.use_flash_attention)
         outputs = rearrange(outputs, "b h n d -> b n (h d)")
+
+        if output_attn_weights:
+            logits = torch.matmul(q, k.transpose(-1, -2)) * self.scale
+            attention_weights = logits.softmax(dim=-1)
+            return outputs, attention_weights
         return outputs
 
-    def forward(self, q: torch.Tensor, inputs: torch.Tensor):
-        if self.grad_checkpointing:
+    def forward(self, q: torch.Tensor, inputs: torch.Tensor, output_attn_weights: bool = False):
+        if self.grad_checkpointing and not output_attn_weights:
             outputs = checkpoint(self.mha, q, inputs, preserve_rng_state=True, use_reentrant=False)
         else:
-            outputs = self.mha(q, inputs)
+            outputs = self.mha(q, inputs, output_attn_weights=output_attn_weights)
         return outputs
 
 
@@ -229,7 +234,7 @@ class AttentionReadout(Readout):
         return self.reg_scale * self.feature_l1(reduction=reduction)
 
 
-    def forward(self, inputs: torch.Tensor, query_neurons: t.Optional[torch.Tensor] = None, query_neuron_ids: t.Optional[torch.Tensor] = None, shifts: t.Optional[torch.Tensor] = None): 
+    def forward(self, inputs: torch.Tensor, query_neurons: t.Optional[torch.Tensor] = None, query_neuron_ids: t.Optional[torch.Tensor] = None, output_attn_weights: bool = False, shifts: t.Optional[torch.Tensor] = None): 
         b, t, c = inputs.size()
         # print("readout inputs shape: ", inputs.shape) # (B, num_tokens, num_channels)
         # print("readout query_neurons shape: ", query_neurons.shape)
@@ -248,8 +253,11 @@ class AttentionReadout(Readout):
         if self.project_query_neurons:
             query_neurons = self.id_query_projection(query_neurons)
         # query_neurons = self.dropout(query_neurons) # [B, N_neurons, emb_dim]
-
-        outputs = self.cross_attention(q=query_neurons, inputs=inputs)
+        
+        if output_attn_weights:
+            outputs, attn_weights = self.cross_attention(q=query_neurons, inputs=inputs, output_attn_weights=output_attn_weights)
+        else:
+            outputs = self.cross_attention(q=query_neurons, inputs=inputs)
         # outputs = self.dropout(outputs) # [B, N_neurons, emb_dim]
         # outputs = self.neuron_projection(outputs).squeeze(-1)  # [B, N_neurons]
 
@@ -264,6 +272,9 @@ class AttentionReadout(Readout):
         bias = self.bias
         if bias is not None:
             outputs += bias[query_neuron_ids]
+        
+        if output_attn_weights:
+            return outputs, attn_weights
         return outputs
 
     
