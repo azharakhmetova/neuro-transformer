@@ -64,9 +64,9 @@ class SimpleResponsesTokenizer(nn.Module):
             self.num_input_tokens = self.num_input_neurons[session] * self.T
             self.output_shapes[session] = (self.num_input_tokens, emb_dim) 
 
-        self.project_neuron_id = emb_dim != args.emb_dim_n_id
+        self.project_neuron_id = emb_dim != args.emb_dim_neuron_id
         if self.project_neuron_id:
-            self.neuron_id_token_projection = nn.Linear(args.emb_dim_n_id, emb_dim)
+            self.neuron_id_token_projection = nn.Linear(args.emb_dim_neuron_id, emb_dim)
 
     def num_tokens_per_neuron(self, num_samples_per_neuron):
         return num_samples_per_neuron // self.samples_per_token
@@ -90,12 +90,12 @@ class SimpleResponsesTokenizer(nn.Module):
         # responses_subset = responses[:, input_neuron_ids, :] #.float().to(input_neuron_ids.device) # select only the neurons we are interested in
         # print("responses subset shape (B, N, S)", responses_subset.shape)
         # print("Tokenizer weight device:", self.tokenizer.weight.device)
-
+        # print("neuron id tokens shape (N, emb)", neuron_id_tokens.shape)
         tok = self.tokenizer(
-                responses.view(B, self.num_input_neurons[mouse_id], self.T, self.samples_per_token)
+                responses.view(B, neuron_id_tokens.shape[0], self.T, self.samples_per_token)
             ) # (B, N, T, samples_per_T) -> (B, N, T, emb_dim_input_neurons)
         if self.use_masking:
-            tok = torch.where(mask.view(B, self.num_input_neurons[mouse_id], self.T, 1), tok, mask_token)
+            tok = torch.where(mask.view(B, neuron_id_tokens.shape[0], self.T, 1), tok, mask_token)
 
         if self.project_neuron_id:
             neuron_id_tok = self.neuron_id_token_projection(neuron_id_tokens) # (N, emb_dim_input_neurons)

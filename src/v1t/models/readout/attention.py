@@ -23,9 +23,10 @@ code reference: https://github.com/KonstantinWilleke/neuralpredictors/blob/4ef51
 class CrossAttention(nn.Module):
     def __init__(
         self,
-        input_shape: tuple,
+        # input_shape: tuple,
         num_neurons: int,
         emb_dim: int,
+        emb_dim_core: int,
         num_heads: int = 8,
         dropout: float = 0.0,
         use_lsa: bool = False,
@@ -46,8 +47,8 @@ class CrossAttention(nn.Module):
         self.value_embedding = value_embedding
         self.use_bias = use_bias
 
-        self.input_shape = input_shape # (t, c)
-        self.subselect_image_tokens = subselect_image_tokens
+        # self.input_shape = input_shape # (t, c)
+        # print("CrossAttention input shape: ", self.input_shape)
         self.num_neurons = num_neurons
         self.emb_dim = emb_dim
         self.heads = num_heads
@@ -62,16 +63,24 @@ class CrossAttention(nn.Module):
 
         # LayerNorm for queries and inputs
         self.layer_norm = nn.LayerNorm(self.emb_dim)
-        self.layer_norm_inputs = nn.LayerNorm(self.input_shape[1])
+        self.layer_norm_inputs = nn.LayerNorm(emb_dim_core)
 
         # Key/Value projection layer (if enabled)
         if self.key_embedding and self.value_embedding:
-            self.to_kv = nn.Linear(in_features=self.input_shape[1], out_features=self.emb_dim * 2, bias=use_bias)
+            self.to_kv = nn.Linear(in_features=emb_dim_core, out_features=self.emb_dim * 2, bias=use_bias)
         elif self.key_embedding:
-            self.to_key = nn.Linear(in_features=self.input_shape[1], out_features=self.emb_dim, bias=use_bias)
-        elif self.value_embedding:
-            self.to_value = nn.Linear(in_features=self.input_shape[1], out_features=self.emb_dim, bias=use_bias)
+            self.to_key = nn.Linear(in_features=emb_dim_core, out_features=self.emb_dim, bias=use_bias)
 
+        # Optional positional embedding
+        # self.positional_embedding = nn.Parameter(
+        #     torch.randn(1, self.input_shape[0], self.input_shape[1])
+        # ) if use_pos_embedding else None
+        # print("CrossAttention positional embedding: ", self.positional_embedding.shape)
+
+        # Reshaping utility for attention
+        self.heads_rearrange = Rearrange("b n (h d) -> b h n d", h=num_heads)
+
+        self.attend = nn.Softmax(dim=-1)
         self.dropout = nn.Dropout(p=dropout)
 
         self.projection = nn.Sequential(
@@ -136,7 +145,7 @@ class AttentionReadout(Readout):
     def __init__(
         self,
         args,
-        input_shape: tuple, # output of core (num_tokens, num_channels)
+        # input_shape: tuple, # output of core (num_tokens, num_channels)
         output_shape: tuple,
         ds: DataLoader,
         num_heads: int = 2,
@@ -147,19 +156,20 @@ class AttentionReadout(Readout):
         value_embedding: bool = True,
         grad_checkpointing: bool = False,
         use_pos_embedding: bool = False,
+        temperature: tuple = (False, 1.0),
         name: str = "AttentionReadout",
     ):
         super(AttentionReadout, self).__init__(
-            args, input_shape=input_shape, output_shape=output_shape, ds=ds, name=name
+            args, output_shape=output_shape, ds=ds, name=name
         )
 
         self.use_bias = use_bias
         self.bias_mode = args.bias_mode
 
         self.cross_attention = CrossAttention(
-            input_shape=input_shape,
             num_neurons=self.num_neurons,
-            emb_dim=args.emb_dim_r,
+            emb_dim=args.emb_dim_readout,
+            emb_dim_core=args.emb_dim_core,
             num_heads=num_heads,
             dropout=dropout,
             use_lsa=use_lsa,
@@ -173,19 +183,22 @@ class AttentionReadout(Readout):
         )
 
         self.dropout = nn.Dropout(p=dropout)
-        self.project_query_neurons = args.emb_dim_r != args.emb_dim_n_id
+        # self.neuron_tokenizer = NeuronTokenizer(num_neurons=self.num_neurons, emb_dim=emb_dim)
+        self.project_query_neurons = args.emb_dim_readout != args.emb_dim_neuron_id
         if self.project_query_neurons:
-            self.id_query_projection = nn.Linear(in_features=args.emb_dim_n_id, out_features=args.emb_dim_r, bias=True)
+            self.id_query_projection = nn.Linear(in_features=args.emb_dim_neuron_id, out_features=args.emb_dim_readout, bias=True)
 
         self.initialize_bias(stats=ds.dataset.response_stats)
-        self.neuron_projection = nn.Linear(in_features=args.emb_dim_r, out_features=1, bias=True)
+        self.neuron_projection = nn.Linear(in_features=args.emb_dim_readout, out_features=1, bias=True)
+        # if use_bias:
+        #     nn.init.normal_(self.neuron_projection.weight, 0.0, 1e-3)
 
-        self.features = self.embedding = nn.Embedding(self.num_neurons, args.emb_dim_r)
-        nn.init.constant_(self.embedding.weight, 1.0 / args.emb_dim_r)
+        # self.features = self.embedding = nn.Embedding(self.num_neurons, args.emb_dim_readout)
+        # nn.init.constant_(self.embedding.weight, 1.0 / args.emb_dim_readout)
 
         # r = 20
-        # self.U = nn.Linear(args.emb_dim_r, r)
-        # self.V = nn.Linear(args.emb_dim_r, r)
+        # self.U = nn.Linear(args.emb_dim_readout, r)
+        # self.V = nn.Linear(args.emb_dim_readout, r)
 
     def initialize_bias(self, stats: t.Dict[str, np.ndarray]):
         if self.use_bias:
@@ -213,15 +226,22 @@ class AttentionReadout(Readout):
         return self.reg_scale * self.feature_l1(reduction=reduction)
 
 
-    def forward(self, inputs: torch.Tensor, query_neurons: t.Optional[torch.Tensor] = None, query_neuron_ids: t.Optional[torch.Tensor] = None, output_attn_weights: bool = False, shifts: t.Optional[torch.Tensor] = None): 
+    def forward(
+        self, 
+        inputs: torch.Tensor, 
+        query_neurons: t.Optional[torch.Tensor] = None, 
+        query_neuron_ids: t.Optional[torch.Tensor] = None, 
+        output_attn_weights: bool = False, 
+        shifts: t.Optional[torch.Tensor] = None
+    ): 
         b, t, c = inputs.size()
         # print("readout inputs shape: ", inputs.shape) # (B, num_tokens, num_channels)
         # print("readout query_neurons shape: ", query_neurons.shape)
-        t_in, c_in = self.input_shape
+        # t_in, c_in = self.input_shape
         # print("readout self.input_shape: ", inputs.shape) # (B, num_tokens, num_channels)
 
-        if (c_in, t_in) != (c, t):
-            warnings.warn("Mismatch between expected and actual input shape.")
+        # if (c_in, t_in) != (c, t):
+        #     warnings.warn("Mismatch between expected and actual input shape.")
 
         # neuron_ids = torch.arange(self.num_neurons, device=inputs.device).unsqueeze(0).expand(b, -1)
         # if neuron_ids is None:
@@ -238,10 +258,10 @@ class AttentionReadout(Readout):
         else:
             outputs = self.cross_attention(q=query_neurons, inputs=inputs)
         # outputs = self.dropout(outputs) # [B, N_neurons, emb_dim]
-        # outputs = self.neuron_projection(outputs).squeeze(-1)  # [B, N_neurons]
+        outputs = self.neuron_projection(outputs).squeeze(-1)  # [B, N_neurons]
 
-        outputs = outputs * self.features(query_neuron_ids)
-        outputs = torch.sum(outputs, dim=-1) # [B, N_neurons]
+        # outputs = outputs * self.features(query_neuron_ids)
+        # outputs = torch.sum(outputs, dim=-1) # [B, N_neurons]
 
         # outputs = outputs * query_neurons
         # outputs = torch.sum(outputs, dim=-1) # [B, N_neurons]

@@ -91,7 +91,6 @@ class BehaviorMLP(nn.Module):
 class Attention(nn.Module):
     def __init__(
         self,
-        num_tokens: int,
         emb_dim: int,
         num_heads: int = 8,
         dropout: float = 0.0,
@@ -118,18 +117,23 @@ class Attention(nn.Module):
             nn.Dropout(p=dropout),
         )
 
-        if use_lsa:
-            diagonal = torch.eye(num_tokens, num_tokens)
-            self.register_buffer(
-                "mask",
-                torch.nonzero(diagonal == 1, as_tuple=False),
-            )
-            self.register_buffer(
-                "max_value",
-                torch.tensor(torch.finfo(torch.get_default_dtype()).max),
-            )
-        else:
-            self.mask = None
+        # if use_lsa:
+        #     self.register_parameter(
+        #         "scale",
+        #         param=nn.Parameter(torch.full(size=(num_heads,), fill_value=scale)),
+        #     )
+        #     diagonal = torch.eye(num_tokens, num_tokens)
+        #     self.register_buffer(
+        #         "mask",
+        #         torch.nonzero(diagonal == 1, as_tuple=False),
+        #     )
+        #     self.register_buffer(
+        #         "max_value",
+        #         torch.tensor(torch.finfo(torch.get_default_dtype()).max),
+        #     )
+        # else:
+        #     self.mask = None
+        #     self.register_buffer("scale", torch.tensor(scale))
 
     def mha(self, inputs: torch.Tensor, output_attn_weights: bool = False):
         inputs = self.layer_norm(inputs)
@@ -165,7 +169,6 @@ class Attention(nn.Module):
 class Transformer(nn.Module):
     def __init__(
         self,
-        num_tokens: int,
         emb_dim: int,
         num_blocks: int,
         num_heads: int,
@@ -185,7 +188,6 @@ class Transformer(nn.Module):
             block = nn.ModuleDict(
                 {
                     "mha": Attention(
-                        num_tokens=num_tokens,
                         emb_dim=emb_dim,
                         num_heads=num_heads,
                         dropout=dropout,
@@ -211,7 +213,7 @@ class Transformer(nn.Module):
                 )
             self.blocks.append(block)
         self.drop_path = DropPath(dropout=drop_path)
-        self.output_shape = (num_tokens, emb_dim) # (num_tokens, emb_dim)
+        # self.output_shape = (num_tokens, emb_dim) # (num_tokens, emb_dim)
         self.apply(self.init_weight)
 
     @staticmethod
@@ -259,10 +261,7 @@ class ViTCore(Core):
     def __init__(
         self,
         args,
-        # input_shape: t.Tuple[int, int, int],
-        # image_encoder_output_shape: t.Tuple[int, int],
         num_image_patches: int,
-        num_neuron_tokens: int,
         name: str = "ViTCore",
     ):
         super(ViTCore, self).__init__(args, name=name)
@@ -279,7 +278,6 @@ class ViTCore(Core):
         self.readout = args.readout
 
         self.transformer = Transformer(
-            num_tokens=num_image_patches+num_neuron_tokens,
             emb_dim=args.emb_dim_core,
             num_blocks=args.num_blocks,
             num_heads=args.num_heads,
@@ -306,14 +304,19 @@ class ViTCore(Core):
             if self.project_neuron:
                 self.neuron_projection = nn.Linear(args.emb_dim_input_neurons, args.emb_dim_core)
             
-
+        self.subselect_image_tokens = args.subselect_image_tokens
         # calculate latent height and width based on num_patches
         if self.readout == "gaussian2d":
             h, w = self.find_shape(num_image_patches)
-            self.output_shape = (self.transformer.output_shape[-1], h, w)
+            # self.output_shape = (self.transformer.output_shape[-1], h, w)
             self.rearrange = Rearrange("b (h w) c -> b c h w", h=h, w=w)
-        else:
-            self.output_shape = (num_image_patches, self.transformer.output_shape[-1]) # self.transformer.output_shape is (num_neuron_tokens+num_iage_tokens, emb_dim)
+        # else:
+        #     if self.subselect_image_tokens:
+        #         self.output_shape = (num_image_patches, self.transformer.output_shape[-1]) # self.transformer.output_shape is (num_neuron_tokens+num_image_tokens, emb_dim)
+        #     else:
+        #         self.output_shape = self.transformer.output_shape # (num_neuron_tokens+num_image_tokens, emb_dim)
+
+
 
     @staticmethod
     def find_shape(num_patches: int):
@@ -357,7 +360,8 @@ class ViTCore(Core):
         else:
             outputs = self.transformer(outputs, mouse_id=mouse_id, behaviors=behaviors, output_attn_weights=output_attn_weights)
         # subselect only image patches because they represent 'receptive fields' of neurons and can be optionally conditioned on input neuron tokens
-        outputs = outputs[:, :self.num_image_patches, :] 
+        if self.subselect_image_tokens:
+            outputs = outputs[:, :self.num_image_patches, :] 
         # outputs = outputs[:, 1:, :]  # remove CLS token
         if self.readout == "gaussian2d":
             outputs = self.rearrange(outputs)
