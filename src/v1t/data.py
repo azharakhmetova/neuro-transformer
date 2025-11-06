@@ -599,7 +599,7 @@ def get_training_ds(
 
         args.num_output_neurons[mouse_id] = (train_ds[mouse_id].dataset.num_neurons,)
 
-    args.input_shape = train_ds[mouse_ids[0]].dataset.image_shape
+    args.image_shape = train_ds[mouse_ids[0]].dataset.image_shape
 
     return train_ds, val_ds, test_ds
 

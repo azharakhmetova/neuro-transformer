@@ -241,7 +241,7 @@ class Summary(object):
         sub_figures = figure.subfigures(nrows=num_samples, ncols=1, hspace=hspace)
         num_neurons = results["predictions"].shape[1]
         x_axis = np.arange(num_neurons)
-        print("x_axis", x_axis.shape)
+        # print("x_axis", x_axis.shape)
 
         # the (x, y) coordinates in crop_grids are in range [-1, 1]
         # need to convert to [0, 144] and [0, 256] in height and width

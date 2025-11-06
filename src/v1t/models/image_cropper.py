@@ -60,9 +60,9 @@ class ImageCropper(nn.Module):
     def __init__(self, args: t.Any, ds: t.Dict[str, DataLoader]):
         super().__init__()
         self.shift_mode = args.shift_mode
-        self.input_shape = args.input_shape
+        self.image_shape = args.image_shape
         self.behavior_mode = args.behavior_mode
-        c, in_h, in_w = args.input_shape
+        c, in_h, in_w = args.image_shape
         out_h, out_w = in_h, in_w
 
         if self.behavior_mode == 1:
@@ -101,7 +101,7 @@ class ImageCropper(nn.Module):
         self.output_shape = (c, out_h, out_w)
 
     def build_grid(self):
-        _, in_h, in_w = self.input_shape
+        _, in_h, in_w = self.image_shape
         h_pixels = torch.linspace(-self.crop_scale, self.crop_scale, self.crop_h)
         w_pixels = torch.linspace(-self.crop_scale, self.crop_scale, self.crop_w)
         mesh_y, mesh_x = torch.meshgrid(h_pixels, w_pixels, indexing="ij")

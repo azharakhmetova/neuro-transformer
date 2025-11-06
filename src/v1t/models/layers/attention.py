@@ -32,7 +32,7 @@ def scaled_dot_product_attention(q: torch.Tensor, k: torch.Tensor, v: torch.Tens
             attn_mask=None,
             dropout_p=dropout,
             is_causal=False
-        )            
+        )         
     # out shape is [B, H, N, D_head]
     return out
 
@@ -45,7 +45,6 @@ class PreCoreAttention(nn.Module):
         dropout: float = 0.1,
         use_bias: bool = True,
         grad_checkpointing: bool = True,
-        scale: bool = False,
         use_flash_attention: bool = False,
     ):
         super(PreCoreAttention, self).__init__()
@@ -55,52 +54,51 @@ class PreCoreAttention(nn.Module):
 
         self.emb_dim = emb_dim
         self.heads = num_heads
+        assert emb_dim % num_heads == 0, "emb_dim must be divisible by num_heads"
+        dim_head = emb_dim // num_heads
 
-        self.saved_attn_scores = []
-
-        if scale:
-            dim_head = self.emb_dim // self.heads
-            self.scale = dim_head ** -0.5
-        else:
-            self.scale = 1.0
+        self.rearrange = Rearrange("b n (h d) -> b h n d", h=num_heads)
 
         # LayerNorm for queries and inputs
         self.layer_norm = nn.LayerNorm(self.emb_dim)
 
         self.to_qkv = nn.Linear(in_features=self.emb_dim, out_features=self.emb_dim * 3, bias=use_bias)
-        
-        self.heads_rearrange = Rearrange("b n (h d) -> b h n d", h=num_heads)
 
-        self.attend = nn.Softmax(dim=-1)
+        self.projection = nn.Sequential(
+            nn.Linear(in_features=dim_head*self.heads, out_features=emb_dim, bias=use_bias),
+            nn.Dropout(p=dropout),
+        )
+
         self.dropout = nn.Dropout(p=dropout)
 
 
-        if scale:
-            self.register_buffer("scale_readout", torch.tensor(self.scale))
 
-
-    def mha(self, tokens: torch.Tensor, save_scores: bool = False):
+    def mha(self, tokens: torch.Tensor, output_attn_weights: bool = False):
         tokens = self.layer_norm(tokens) # [B, N_input_neurons, emb_dim]
         q, k, v = torch.chunk(self.to_qkv(tokens), chunks=3, dim=-1)
 
-        if save_scores:
-            attn_scores = einsum("b h n d, b h m d -> b h n m", q, k) * self.scale
-            attn_scores = self.attend(attn_scores)
-            outputs = einsum("b h n m, b h m d -> b h n d", attn_scores, v)
-            self.input_neurons_attn_scores.append(attn_scores.detach().cpu())
-            
         outputs = scaled_dot_product_attention(
             q=self.rearrange(q), k=self.rearrange(k), v=self.rearrange(v), dropout=self.dropout.p, use_flash_attention=self.use_flash_attention,
         )
-        outputs = scaled_dot_product_attention(q=q, k=k, v=v, dropout=self.dropout.p, use_flash_attention=self.use_flash_attention)
         outputs = rearrange(outputs, "b h n d -> b n (h d)")
+        outputs = self.projection(outputs)
+
+        if output_attn_weights:
+            q_h, k_h = self.rearrange(q), self.rearrange(k)
+            logits = torch.matmul(q_h, k_h.transpose(-1, -2)) * (k_h.size(-1) ** -0.5)
+            attention_weights = logits.softmax(dim=-1)
+            return outputs, attention_weights
         return outputs
 
-    def forward(self, tokens: torch.Tensor, save_scores: bool = False):
-        if self.grad_checkpointing:
+    def forward(self, tokens: torch.Tensor, output_attn_weights: bool = False):
+        if self.grad_checkpointing and not output_attn_weights:
             outputs = checkpoint(self.mha, tokens, preserve_rng_state=True, use_reentrant=False)
-        else:
-            outputs = self.mha(tokens, save_scores=save_scores)
+            return outputs
+        if output_attn_weights:
+            outputs, attention_weights = self.mha(tokens, output_attn_weights)
+            return outputs, attention_weights
+        
+        outputs = self.mha(tokens, output_attn_weights=output_attn_weights)
         return outputs
 
 class PreCoreTransformer(nn.Module):

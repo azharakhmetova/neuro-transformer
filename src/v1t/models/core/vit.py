@@ -98,31 +98,27 @@ class Attention(nn.Module):
         use_flash_attention: bool = False,
         use_lsa: bool = False,
         use_bias: bool = True,
-        use_scale: bool = True,
         grad_checkpointing: bool = False,
     ):
         super(Attention, self).__init__()
         self.grad_checkpointing = grad_checkpointing
         self.use_flash_attention = use_flash_attention
+        
+        assert emb_dim % num_heads == 0, "emb_dim must be divisible by num_heads"
+        dim_head = emb_dim // num_heads
 
         self.layer_norm = nn.LayerNorm(emb_dim)
 
         self.to_qkv = nn.Linear(in_features=emb_dim, out_features=emb_dim * 3, bias=use_bias)
         self.rearrange = Rearrange("b n (h d) -> b h n d", h=num_heads)
-        self.attend = nn.Softmax(dim=-1)
         self.dropout = nn.Dropout(p=dropout)
 
-        if use_scale:
-            dim_head = emb_dim // num_heads
-            scale = dim_head ** -0.5
-        else:
-            scale = 1.0
+        self.projection = nn.Sequential(
+            nn.Linear(in_features=dim_head*num_heads, out_features=emb_dim, bias=use_bias),
+            nn.Dropout(p=dropout),
+        )
 
         if use_lsa:
-            self.register_parameter(
-                "scale",
-                param=nn.Parameter(torch.full(size=(num_heads,), fill_value=scale)),
-            )
             diagonal = torch.eye(num_tokens, num_tokens)
             self.register_buffer(
                 "mask",
@@ -134,24 +130,35 @@ class Attention(nn.Module):
             )
         else:
             self.mask = None
-            self.register_buffer("scale", torch.tensor(scale))
 
-    def mha(self, inputs: torch.Tensor):
+    def mha(self, inputs: torch.Tensor, output_attn_weights: bool = False):
         inputs = self.layer_norm(inputs)
         q, k, v = torch.chunk(self.to_qkv(inputs), chunks=3, dim=-1)
         outputs = scaled_dot_product_attention(
             q=self.rearrange(q), k=self.rearrange(k), v=self.rearrange(v), dropout=self.dropout.p, use_flash_attention=self.use_flash_attention,
         )
         outputs = rearrange(outputs, "b h n d -> b n (h d)")
+        outputs = self.projection(outputs)
+        
+        if output_attn_weights:
+            q_h, k_h = self.rearrange(q), self.rearrange(k)
+            logits = torch.matmul(q_h, k_h.transpose(-1, -2)) * (k_h.size(-1) ** -0.5)
+            attention_weights = logits.softmax(dim=-1)
+            return outputs, attention_weights
+        
         return outputs
 
-    def forward(self, inputs: torch.Tensor):
-        if self.grad_checkpointing:
+    def forward(self, inputs: torch.Tensor, output_attn_weights: bool = False):
+        if self.grad_checkpointing and not output_attn_weights:
             outputs = checkpoint(
                 self.mha, inputs, preserve_rng_state=True, use_reentrant=False
             )
-        else:
-            outputs = self.mha(inputs)
+            return outputs
+        if output_attn_weights:
+            outputs, attention_weights = self.mha(inputs, output_attn_weights)
+            return outputs, attention_weights
+        
+        outputs = self.mha(inputs, output_attn_weights=output_attn_weights)
         return outputs
 
 
@@ -222,16 +229,28 @@ class Transformer(nn.Module):
         inputs: torch.Tensor,
         mouse_id: str,
         behaviors: torch.Tensor,
+        output_attn_weights: bool = False
     ):
         outputs = inputs
+        attn_list = []
         for block in self.blocks:
             if "b-mlp" in block:
                 b_latent = block["b-mlp"](behaviors, mouse_id=mouse_id)
                 b_latent = repeat(b_latent, "b d -> b 1 d")
                 outputs = outputs + b_latent
-            outputs = self.drop_path(block["mha"](outputs)) + outputs
+            if output_attn_weights:
+                y, attn = block["mha"](outputs, output_attn_weights=output_attn_weights)
+                outputs = self.drop_path(y) + outputs          
+                attn_list.append(attn)       
+            else:
+                outputs = self.drop_path(block["mha"](outputs)) + outputs
             outputs = self.drop_path(block["mlp"](outputs)) + outputs
         # outputs: (1, num_tokens, emb_dim)
+        if output_attn_weights:
+            # stack along layer dim -> [B, L, H, N, N]
+            attn_weights = torch.stack(attn_list, dim=1)
+            return outputs, attn_weights
+        
         return outputs
 
 
@@ -259,14 +278,6 @@ class ViTCore(Core):
 
         self.readout = args.readout
 
-        # self.patch_embedding = Image2Patches(
-        #     image_shape=input_shape,
-        #     patch_mode=args.patch_mode,
-        #     patch_size=args.patch_size,
-        #     stride=args.patch_stride,
-        #     emb_dim=args.emb_dim_core,
-        #     dropout=args.p_dropout,
-        # )
         self.transformer = Transformer(
             num_tokens=num_image_patches+num_neuron_tokens,
             emb_dim=args.emb_dim_core,
@@ -285,9 +296,8 @@ class ViTCore(Core):
         self.num_image_patches = num_image_patches
         self.project_image = args.emb_dim_image != args.emb_dim_core
         if self.project_image:
-            self.image_projection = nn.Linear(in_features=args.emb_dim_image, out_features=args.emb_dim_core, bias=False)
+            self.image_projection = nn.Linear(in_features=args.emb_dim_image, out_features=args.emb_dim_core)
         
-        # self.tokenize_neurons = args.tokenize_neurons
         if args.tokenize_neurons:
             self.use_mode_emb = args.use_mode_emb
             self.mode_embedding = nn.Embedding(args.num_modes, args.emb_dim_core)
@@ -324,9 +334,10 @@ class ViTCore(Core):
         mouse_id: str,
         behaviors: torch.Tensor,
         pupil_centers: torch.Tensor,
+        output_attn_weights: bool = False,
     ):
         if self.project_image:
-            image_tokens = self.image_projection(outputs)
+            image_tokens = self.image_projection(image_tokens)
         
         if neuron_tokens is not None:
             if self.project_neuron:
@@ -341,10 +352,17 @@ class ViTCore(Core):
             outputs = image_tokens
         if self.behavior_mode in (3, 4):
             behaviors = torch.cat((behaviors, pupil_centers), dim=-1)
-        outputs = self.transformer(outputs, mouse_id=mouse_id, behaviors=behaviors)
+        if output_attn_weights:
+            outputs, attn_weights = self.transformer(outputs, mouse_id=mouse_id, behaviors=behaviors, output_attn_weights=output_attn_weights)
+        else:
+            outputs = self.transformer(outputs, mouse_id=mouse_id, behaviors=behaviors, output_attn_weights=output_attn_weights)
         # subselect only image patches because they represent 'receptive fields' of neurons and can be optionally conditioned on input neuron tokens
         outputs = outputs[:, :self.num_image_patches, :] 
         # outputs = outputs[:, 1:, :]  # remove CLS token
         if self.readout == "gaussian2d":
             outputs = self.rearrange(outputs)
+        
+        if output_attn_weights:
+            return outputs, attn_weights
+        
         return outputs

@@ -59,17 +59,19 @@ class Model(nn.Module):
             args.num_output_neurons, dict
         ), "output_shapes must be a dictionary of mouse_id and output_shape"
         self.name = name
-        self.input_shape = args.input_shape
-        print("input shape", self.input_shape)
+        self.image_shape = args.image_shape
+        print("image shape", self.image_shape)
         self.num_output_neurons = args.num_output_neurons
         print("num_output_neurons", self.num_output_neurons)
         self.shift_mode = args.shift_mode
         self.readout_type = args.readout
         self.self_attend_image_tokens = args.self_attend_image_tokens
+        self.self_attend_input_neurons = args.self_attend_input_neurons
         self.use_pe_after_core = args.use_pe_after_core
         self.pe_after_core = args.pe_after_core
         self.frac_input_neurons = args.frac_input_neurons
         self.tokenize_neurons = args.tokenize_neurons
+        self.subselect_image_tokens = args.subselect_image_tokens
 
         if self.tokenize_neurons:
             self.emb_dim_input_neurons = args.emb_dim_input_neurons
@@ -121,7 +123,6 @@ class Model(nn.Module):
                 if self.project_query_pe:
                     self.projection_query_pe = nn.Linear(args.emb_dim_input_neurons, args.emb_dim_n_id)
                 
-                self.self_attend_input_neurons = args.self_attend_input_neurons
                 if self.self_attend_input_neurons:
                     self.input_neurons_attention = PreCoreAttention(
                         emb_dim=args.emb_dim_input_neurons,
@@ -364,7 +365,7 @@ class Model(nn.Module):
                     input_coords = neuron_coords[:, input_neuron_ids, :]  
                     input_neuron_tokens += (self.neuron_pe(responses)[:, input_neuron_ids, :] + self.neuron_coord_pe(input_coords))
             if self.self_attend_input_neurons:
-                input_neuron_tokens = self.input_neurons_attention(input_neuron_tokens, save_scores=save_input_neuron_scores)  # (B, K, emb_dim_input_neurons)
+                input_neuron_tokens = self.input_neurons_attention(input_neuron_tokens)  # (B, K, emb_dim_input_neurons)
                 if self.use_input_neuron_pe:
                     if self.neuron_pe_mode == "1d":
                         # print(self.neuron_pe(responses).shape)
@@ -387,15 +388,17 @@ class Model(nn.Module):
             behaviors=behaviors,
             pupil_centers=pupil_centers,
         )
-        # CHANGE LEARNABLE CASE and remove it from attention readout
-        # add positional encoding after the core 
-        if self.use_pe_after_core:
-            if self.pe_after_core == "2d":
-                temp = outputs.reshape(outputs.shape[0], self.patch_embedding.height, self.patch_embedding.width, outputs.shape[-1])  # (B, h, w, num_channels)
-                temp += self.patch_embedding.pos_embedding(temp)
-                outputs = temp.reshape(outputs.shape[0], -1, outputs.shape[-1])  # (B, num_tokens, num_channels)
-            elif self.pe_after_core == "1d":
-                outputs += self.patch_embedding.pos_embedding(outputs)
+
+        if self.subselect_image_tokens:
+            # CHANGE LEARNABLE CASE and remove it from attention readout
+            # add positional encoding after the core 
+            if self.use_pe_after_core:
+                if self.pe_after_core == "2d":
+                    temp = outputs.reshape(outputs.shape[0], self.patch_embedding.height, self.patch_embedding.width, outputs.shape[-1])  # (B, h, w, num_channels)
+                    temp += self.patch_embedding.pos_embedding(temp)
+                    outputs = temp.reshape(outputs.shape[0], -1, outputs.shape[-1])  # (B, num_tokens, num_channels)
+                elif self.pe_after_core == "1d":
+                    outputs += self.patch_embedding.pos_embedding(outputs)
 
         shifts = None
         if self.core_shifter is not None:
@@ -443,7 +446,7 @@ def get_model(args, ds: t.Dict[str, DataLoader], summary: Summary = None) -> Mod
     N = list(model.num_output_neurons.items())[0][1][0]
     print("N neurons", N)
     input_data={
-        "images": random_input((batch_size, *model.input_shape)),
+        "images": random_input((batch_size, *model.image_shape)),
         "responses": random_input((batch_size, N, 1)),
         "neuron_coords": random_input((batch_size, N, 3)),
         "behaviors": random_input((batch_size, 3)),

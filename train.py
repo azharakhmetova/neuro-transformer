@@ -313,6 +313,7 @@ def main(args, wandb_sweep: bool = False):
                     "train_loss": train_result["loss"],
                     "val_loss": val_result["loss"],
                     "val_corr": val_result["single_trial_correlation"],
+                    "bits_per_spike": val_result["bits_per_spike"],
                     "best_corr": scheduler.best_value,
                     "elapse": elapse,
                     **lr_dict,
@@ -570,6 +571,7 @@ if __name__ == "__main__":
 
     parser.add_argument("--tokenize_neurons", action="store_true")
     parser.add_argument("--emb_dim_image", type=int, default=156)
+    parser.add_argument("--subselect_image_tokens", action="store_true", help="subselect only image tokens from the core output to pass to the readout.")
 
     # positional embeddings settings for image tokens or image-related tokens of the core's output
     parser.add_argument(
