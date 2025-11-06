@@ -60,9 +60,9 @@ class ImageCropper(nn.Module):
     def __init__(self, args: t.Any, ds: t.Dict[str, DataLoader]):
         super().__init__()
         self.shift_mode = args.shift_mode
-        self.input_shape = args.input_shape
+        self.input_shape = args.image_shape
         self.behavior_mode = args.behavior_mode
-        c, in_h, in_w = args.input_shape
+        c, in_h, in_w = args.image_shape
         out_h, out_w = in_h, in_w
 
         if self.behavior_mode == 1:

@@ -33,6 +33,7 @@ SENSORIUM = {
     "k_4_a_max_b1e7_strat":            "k_4_a_max_beta1e7_rates_stratified",
     "k_4_a_01_b1e7_poisson":           "k_4_a_01_beta1e7_poisson",
     "k_4_a_03_b1e7_poisson":           "k_4_a_03_beta1e7_poisson",
+    "k_4_a_03_xyz_b1e7_poisson":       "k_4_a_03_xyz_beta1e7_poisson",
     "k_4_a_05_b1e7_poisson":           "k_4_a_05_beta1e7_poisson",
     "k_4_a_1_b1e7_poisson":            "k_4_a_1_beta1e7_poisson",
     "k_4_a_1_b1e7_poisson_strat":      "k_4_a_1_beta1e7_poisson_stratified",
@@ -599,7 +600,7 @@ def get_training_ds(
 
         args.num_output_neurons[mouse_id] = (train_ds[mouse_id].dataset.num_neurons,)
 
-    args.input_shape = train_ds[mouse_ids[0]].dataset.image_shape
+    args.image_shape = train_ds[mouse_ids[0]].dataset.image_shape
 
     return train_ds, val_ds, test_ds
 

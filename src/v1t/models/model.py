@@ -59,25 +59,27 @@ class Model(nn.Module):
             args.num_output_neurons, dict
         ), "output_shapes must be a dictionary of mouse_id and output_shape"
         self.name = name
-        self.input_shape = args.input_shape
-        print("input shape", self.input_shape)
+        self.image_shape = args.image_shape
+        print("image shape", self.image_shape)
         self.num_output_neurons = args.num_output_neurons
         print("num_output_neurons", self.num_output_neurons)
         self.shift_mode = args.shift_mode
         self.readout_type = args.readout
         self.self_attend_image_tokens = args.self_attend_image_tokens
+        self.self_attend_input_neurons = args.self_attend_input_neurons
         self.use_pe_after_core = args.use_pe_after_core
         self.pe_after_core = args.pe_after_core
         self.frac_input_neurons = args.frac_input_neurons
         self.tokenize_neurons = args.tokenize_neurons
+        self.subselect_image_tokens = args.subselect_image_tokens
 
         if self.tokenize_neurons:
             self.emb_dim_input_neurons = args.emb_dim_input_neurons
             self.neuron_id_tokenizer = nn.ModuleDict({})
             for s, num_neurons in self.num_output_neurons.items():
-                self.neuron_id_tokenizer[s] = NeuronIDTokenizer(num_neurons=num_neurons[0], emb_dim=args.emb_dim_n_id)#, device=args.device)
-            
-            self.session_tokenizer = nn.Embedding(len(self.num_output_neurons), args.emb_dim_n_id)
+                self.neuron_id_tokenizer[s] = NeuronIDTokenizer(num_neurons=num_neurons[0], emb_dim=args.emb_dim_neuron_id)#, device=args.device)
+
+            self.session_tokenizer = nn.Embedding(len(self.num_output_neurons), args.emb_dim_neuron_id)
             self.sessions_enc = {}
             for i, s in enumerate(self.num_output_neurons.keys()):
                 self.sessions_enc[s] = torch.Tensor([i]).long().to(args.device)
@@ -87,11 +89,11 @@ class Model(nn.Module):
             self.neuron_pe_mode  = args.neuron_pe_mode
             if self.neuron_pe_mode in ("1d", "both"):
                 self.neuron_pe = PositionalEncoding(
-                    d_model=args.emb_dim_n_id,
+                    d_model=args.emb_dim_neuron_id,
                     mode="1d",
                     )
             if self.neuron_pe_mode in ("coord", "both"):
-                self.neuron_coord_pe = nn.Linear(3, args.emb_dim_n_id)
+                self.neuron_coord_pe = nn.Linear(3, args.emb_dim_neuron_id)
 
             # add input neurons tokenization
             if self.frac_input_neurons > 0.0:                  
@@ -116,12 +118,12 @@ class Model(nn.Module):
                     self.neuron_coord_pe = nn.Linear(3, args.emb_dim_input_neurons)
 
                 # if we want to add neuronal pos emb to query neuron tokens, 
-                # are projected to id emb dim, if emb_dim_input_neurons != emb_dim_n_id
-                self.project_query_pe = args.emb_dim_input_neurons != args.emb_dim_n_id
+                # they are projected to id emb dim, if emb_dim_input_neurons != emb_dim_n_id
+                self.project_query_pe = args.emb_dim_input_neurons != args.emb_dim_neuron_id
                 if self.project_query_pe:
-                    self.projection_query_pe = nn.Linear(args.emb_dim_input_neurons, args.emb_dim_n_id)
+                    self.projection_query_pe = nn.Linear(args.emb_dim_input_neurons, args.emb_dim_neuron_id)
                 
-                self.self_attend_input_neurons = args.self_attend_input_neurons
+                
                 if self.self_attend_input_neurons:
                     self.input_neurons_attention = PreCoreAttention(
                         emb_dim=args.emb_dim_input_neurons,
@@ -162,7 +164,6 @@ class Model(nn.Module):
                 args,
                 # input_shape=self.image_cropper.output_shape,
                 num_image_patches=self.patch_embedding.num_patches,
-                num_neuron_tokens=self.input_neuron_embedding.num_input_tokens if self.frac_input_neurons > 0 else 0,
             ),
         )
         if self.shift_mode in (2, 3, 4):
@@ -183,7 +184,7 @@ class Model(nn.Module):
             module=Readouts(
                 args,
                 model=args.readout,
-                input_shape=self.core.output_shape,
+                # input_shape=self.core.output_shape,
                 output_shapes=self.num_output_neurons,
                 ds=ds,
             ),
@@ -312,7 +313,7 @@ class Model(nn.Module):
         reg += self.id_tokenizer_l1(reduction="sum") * 0.0076
         if not self.core.frozen:
             reg += self.core.regularizer()
-        reg += self.readouts.regularizer(mouse_id=mouse_id)
+        # reg += self.readouts.regularizer(mouse_id=mouse_id)
         reg += self.image_cropper.regularizer(mouse_id=mouse_id)
         if self.core_shifter is not None:
             reg += self.core_shifter.regularizer(mouse_id=mouse_id)
@@ -342,11 +343,12 @@ class Model(nn.Module):
         if self.self_attend_image_tokens:
             image_tokens = self.image_tokens_attention(image_tokens)
 
-        if self.tokenize_neurons and self.frac_input_neurons > 0:
+        if self.tokenize_neurons and input_neuron_ids is not None and self.frac_input_neurons > 0.0:
             # add time dimension for image responses
             if responses.dim() != 3:
                 responses = responses.unsqueeze(-1)
             input_neuron_id_tokens = self.neuron_id_tokenizer[mouse_id](input_neuron_ids.to(torch.long)) + self.session_tokenizer(self.sessions_enc[mouse_id].to(self.device))  # (B, K, emb_dim_n_id)
+            # print("input neuron id tokens shape (K, emb)", input_neuron_id_tokens.shape)
             input_neuron_tokens = self.input_neuron_embedding(
                 responses=responses[:, input_neuron_ids, :],
                 mouse_id=mouse_id,
@@ -387,15 +389,17 @@ class Model(nn.Module):
             behaviors=behaviors,
             pupil_centers=pupil_centers,
         )
-        # CHANGE LEARNABLE CASE and remove it from attention readout
-        # add positional encoding after the core 
-        if self.use_pe_after_core:
-            if self.pe_after_core == "2d":
-                temp = outputs.reshape(outputs.shape[0], self.patch_embedding.height, self.patch_embedding.width, outputs.shape[-1])  # (B, h, w, num_channels)
-                temp += self.patch_embedding.pos_embedding(temp)
-                outputs = temp.reshape(outputs.shape[0], -1, outputs.shape[-1])  # (B, num_tokens, num_channels)
-            elif self.pe_after_core == "1d":
-                outputs += self.patch_embedding.pos_embedding(outputs)
+
+        if self.subselect_image_tokens:
+            # CHANGE LEARNABLE CASE and remove it from attention readout
+            # add positional encoding after the core 
+            if self.use_pe_after_core:
+                if self.pe_after_core == "2d":
+                    temp = outputs.reshape(outputs.shape[0], self.patch_embedding.height, self.patch_embedding.width, outputs.shape[-1])  # (B, h, w, num_channels)
+                    temp += self.patch_embedding.pos_embedding(temp)
+                    outputs = temp.reshape(outputs.shape[0], -1, outputs.shape[-1])  # (B, num_tokens, num_channels)
+                elif self.pe_after_core == "1d":
+                    outputs += self.patch_embedding.pos_embedding(outputs)
 
         shifts = None
         if self.core_shifter is not None:
@@ -443,12 +447,11 @@ def get_model(args, ds: t.Dict[str, DataLoader], summary: Summary = None) -> Mod
     N = list(model.num_output_neurons.items())[0][1][0]
     print("N neurons", N)
     input_data={
-        "images": random_input((batch_size, *model.input_shape)),
+        "images": random_input((batch_size, *model.image_shape)),
         "responses": random_input((batch_size, N, 1)),
         "neuron_coords": random_input((batch_size, N, 3)),
         "behaviors": random_input((batch_size, 3)),
         "pupil_centers": random_input((batch_size, 2)),
-        # "neuron_coords": random_input((batch_size, N, 3)),
     }
     # if args.tokenize_neurons and args.frac_input_neurons == 0.0:
     #     input_data["query_neuron_ids"] = torch.arange(N, dtype=torch.long, device="cpu")#.view(-1)
@@ -476,6 +479,7 @@ def get_model(args, ds: t.Dict[str, DataLoader], summary: Summary = None) -> Mod
         print(str(model_info))
 
     # get core info
+    # print("get core model info neuron tokens", model.input_neuron_embedding.output_shapes[mouse_id])
     get_model_info(
         model=model.core,
         input_data={
@@ -490,11 +494,13 @@ def get_model(args, ds: t.Dict[str, DataLoader], summary: Summary = None) -> Mod
         tag="model/trainable_parameters/core",
     )
     # get readout summary
+    num_input_neuron_tokens = model.input_neuron_embedding.output_shapes[mouse_id][0] if args.frac_input_neurons > 0.0 else 0
+    # print("get model num input neuron tokens", num_input_neuron_tokens)
     get_model_info(
         model=model.readouts[mouse_id],
         input_data={
-            "inputs": random_input((batch_size, *model.core.output_shape)),
-            "query_neurons": random_input((batch_size, N-K, args.emb_dim_n_id)),
+            "inputs": random_input((batch_size, model.patch_embedding.num_patches + num_input_neuron_tokens, args.emb_dim_core)),
+            "query_neurons": random_input((batch_size, N-K, args.emb_dim_neuron_id)),
             "query_neuron_ids": input_data["query_neuron_ids"],
             },
         filename=os.path.join(args.output_dir, "model_readout.txt"),

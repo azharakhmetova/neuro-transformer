@@ -15,6 +15,7 @@ from v1t.utils.logger import Logger
 from v1t.models import get_model, Model
 from v1t.utils import utils, tensorboard
 from v1t.utils.scheduler import Scheduler
+from v1t.utils.fraction_schedulers import get_fraction_scheduler
 
 
 def gather(result: t.Dict[str, t.List[torch.Tensor]]):
@@ -61,6 +62,7 @@ def train_step(
             y_true = y_true[:, micro_batch["query_neuron_ids"]]
             input_neuron_ids = micro_batch["input_neuron_ids"].to(device) if model.frac_input_neurons > 0 else None
             query_neuron_ids = micro_batch["query_neuron_ids"].to(device) if model.tokenize_neurons else None
+            # print("Input Neurons:", input_neuron_ids, "Query Neurons:", len(query_neuron_ids))
             y_pred, _, _ = model(
                 images=micro_batch["image"].to(device),
                 responses=micro_batch["response"].to(device),
@@ -97,6 +99,7 @@ def train(
     optimizer: torch.optim,
     criterion: losses.Loss,
     scaler: GradScaler,
+    fraction_scheduler: t.Callable[[int], float],
     epoch: int,
     summary: tensorboard.Summary,
 ) -> t.Dict[t.Union[str, int], t.Union[torch.Tensor, t.Dict[str, torch.Tensor]]]:
@@ -110,6 +113,26 @@ def train(
     for i, (mouse_id, mouse_batch) in tqdm(
         enumerate(ds), desc="Train", total=len(ds), disable=args.verbose < 2
     ):
+        # if args.regularized_training:
+        #     frac = torch.rand(1).item() * args.frac_input_neurons
+        #     N = mouse_batch["response"].size(1)
+        #     k_in = int(round(frac * N))
+        #     print("frac:", frac, "input neurons:", k_in)
+        #     perm = torch.randperm(N, device=mouse_batch["response"].device)
+        #     mouse_batch["input_neuron_ids"] = perm[:k_in].long()
+        #     mouse_batch["query_neuron_ids"] = perm[k_in:].long()
+
+        if args.scheduled_training:
+            step = (epoch - 1) * len(ds) + i
+            frac = fraction_scheduler(step)
+            args.frac_input_neurons = frac
+            N = mouse_batch["response"].size(1)
+            k_in = int(round(frac * N))
+            # print("frac:", frac, "input neurons:", k_in)
+            perm = torch.randperm(N, device=mouse_batch["response"].device)
+            mouse_batch["input_neuron_ids"] = perm[:k_in].long()
+            mouse_batch["query_neuron_ids"] = perm[k_in:].long()
+
         result = train_step(
             mouse_id=mouse_id,
             batch=mouse_batch,
@@ -117,6 +140,7 @@ def train(
             optimizer=optimizer,
             criterion=criterion,
             scaler=scaler,
+
             update=(i + 1) % update_frequency == 0,
             micro_batch_size=args.micro_batch_size,
             device=args.device,
@@ -165,7 +189,7 @@ def validation_step(
             total_loss = loss + reg_loss
         result["loss/loss"].append(loss)
         result["loss/reg_loss"].append(reg_loss)
-        result["loss/total_loss"].append(total_loss)
+        result["loss/total_loss"].append(total_loss/batch["query_neuron_ids"].size(0))
         targets.append(y_true)
         predictions.append(y_pred)
     return gather(result), vstack(targets), vstack(predictions)
@@ -229,6 +253,12 @@ def main(args, wandb_sweep: bool = False):
     )
     summary = tensorboard.Summary(args)
 
+    if args.scheduled_training:
+        fraction_scheduler = get_fraction_scheduler(name=args.fraction_scheduler, f0=args.fraction_min,
+                                    fmax=args.frac_input_neurons, warmup_steps=args.fraction_warmup_steps)
+    else:
+        fraction_scheduler = None
+
     model = get_model(args, ds=train_ds, summary=summary)
     args.core_lr = args.lr if args.core_lr is None else args.core_lr
     optimizer = torch.optim.AdamW(
@@ -269,6 +299,7 @@ def main(args, wandb_sweep: bool = False):
             optimizer=optimizer,
             criterion=criterion,
             scaler=scaler,
+            fraction_scheduler=fraction_scheduler,
             epoch=epoch,
             summary=summary,
         )
@@ -299,6 +330,7 @@ def main(args, wandb_sweep: bool = False):
                 f'Train\t\tloss: {train_result["loss"]:.04f}\n'
                 f'Validation\tloss: {val_result["loss"]:.04f}\t'
                 f'correlation: {val_result["single_trial_correlation"]:.04f}\n'
+                f'Bits/Spike: {val_result["bits_per_spike"]:.04f}\n'
                 f"Elapse: {elapse:.02f}s"
             )
         early_stop = scheduler.step(val_result["single_trial_correlation"], epoch=epoch)
@@ -313,6 +345,7 @@ def main(args, wandb_sweep: bool = False):
                     "train_loss": train_result["loss"],
                     "val_loss": val_result["loss"],
                     "val_corr": val_result["single_trial_correlation"],
+                    "bits_per_spike": val_result["bits_per_spike"],
                     "best_corr": scheduler.best_value,
                     "elapse": elapse,
                     **lr_dict,
@@ -567,9 +600,11 @@ if __name__ == "__main__":
         "3 - shift input to both core and readout module"
         "4 - shift_mode=3 and provide both behavior and pupil center to cropper",
     )
-
+    # parser.add_argument("--regularized_training", action="store_true", help="use regularized training with fraction of input neurons fixed during training.")
+    parser.add_argument("--scheduled_training", action="store_true", help="use scheduled training with fraction of input neurons increasing with training steps.")
     parser.add_argument("--tokenize_neurons", action="store_true")
     parser.add_argument("--emb_dim_image", type=int, default=156)
+    parser.add_argument("--subselect_image_tokens", action="store_true", help="subselect only image tokens from the core output to pass to the readout.")
 
     # positional embeddings settings for image tokens or image-related tokens of the core's output
     parser.add_argument(
@@ -612,7 +647,7 @@ if __name__ == "__main__":
     temp_args = parser.parse_known_args()[0]
 
     if temp_args.tokenize_neurons:
-        parser.add_argument("--emb_dim_n_id", type=int, default=160)
+        parser.add_argument("--emb_dim_neuron_id", type=int, default=160)
         parser.add_argument("--emb_dim_input_neurons", type=int, default=152)
         parser.add_argument("--num_samples_per_token", type=int, default=1)
         parser.add_argument("--num_modes", type=int, default=2)
@@ -751,7 +786,7 @@ if __name__ == "__main__":
         parser.add_argument("--readout_reg_scale", type=float, default=0.0076)
     elif temp_args.readout == "attention":
         # parser.add_argument("--num_heads", type=int, default=4)
-        parser.add_argument("--emb_dim_r", type=int, default=160)
+        parser.add_argument("--emb_dim_readout", type=int, default=160)
         parser.add_argument("--readout_reg_scale", type=float, default=0.0076)
         parser.add_argument("--dropout", type=float, default=0.2544)
         parser.add_argument(
@@ -767,6 +802,12 @@ if __name__ == "__main__":
     else:
         parser.add_argument("--readout_reg_scale", type=float, default=0.0)
 
+    # hyper-parameters for scheduled training
+    if temp_args.scheduled_training:
+        parser.add_argument("--fraction_scheduler", type=str, default="random", choices=["linear", "exponential", "cosine", "asymptotic", "random"])
+        parser.add_argument("--fraction_warmup_steps", type=int, default=5000, help="number of warmup steps to reach the maximum fraction of input neurons.")
+        parser.add_argument("--fraction_min", type=float, default=0.0, help="minimum fraction of input neurons to use.")
+        # parser.add_argument("--fraction_max", type=float, default=0.95, help="maximum fraction of input neurons to use.")
     # hyper-parameters for core shifter module
     if temp_args.shift_mode in (1, 2, 3, 4):
         parser.add_argument("--shifter_reg_scale", type=float, default=0.0)
