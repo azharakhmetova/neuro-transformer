@@ -72,10 +72,10 @@ def extract_attention_maps(
         "behaviors": [],
         "pupil_centers": [],
         # core (rollout)
-        "core_image_rollout_maps": [],              # [B, H_img, W_img] rollout or diag-like
-        "core_neuron_to_image_rollout_maps": [],        # [B, K, H_img, W_img] 
-        "core_image_to_neuron_rollout_maps": [],        # [B, P, K] 
-        "core_neuron_to_neuron_rollout_maps": [],       # [B, K, K]
+        "core_image_rollout_maps": [],              # [B, L, H_img, W_img] rollout or diag-like
+        "core_neuron_to_image_rollout_maps": [],        # [B, L, K, H_img, W_img] 
+        "core_image_to_neuron_rollout_maps": [],        # [B, L, P, K] 
+        "core_neuron_to_neuron_rollout_maps": [],       # [B, L, K, K]
         # core (last layer)
         "core_neuron_to_image_maps": [],        # [B, K, H_img, W_img]
         "core_image_to_neuron_maps": [],        # [B, P, K]
@@ -241,9 +241,11 @@ def extract_attention_maps(
                 # s_im = rollout_single_sample(core_attn[b], slice_idx=image_cols,
                                             #  seed="uniform_image", head_reduce=head_reduce)
                 # batch_image_maps.append(s_im.view(H_P, W_P))
-                s_im = normalize(s_im)
-                s_im = resize(s_im.reshape(H_P, W_P).unsqueeze(0), size=image_shape, antialias=False)
-                batch_image_maps.append(s_im.squeeze(0))  # [H_img, W_img] resized
+                s_im = [normalize(s_im[i]) for i in range(s_im.size(0))] 
+                s_im = torch.stack(s_im, 0)  # [L, P]
+                print("s_im", s_im.shape)
+                s_im = resize(s_im.reshape(s_im.shape[0], H_P, W_P), size=image_shape, antialias=False)
+                batch_image_maps.append(s_im)  # [H_img, W_img] resized
 
                 if K > 0:
                     print(image_cols)
@@ -429,10 +431,11 @@ def rollout(attn_LHNN: torch.Tensor,
     for l in range(1, A.size(0)):
         J[l] = A[l] @ J[l-1]
 
-    J_last = J[-1].mean(dim = 0)
+    J_mean = [J[i].mean(dim = 0) for i in range(J.size(0))]
+    J_mean = torch.stack(J_mean)
 
     # Return only desired columns (slice)
-    return J_last[slice_idx]
+    return J_mean[:, slice_idx]
 
 def rollout_single_sample(attn_LHNN: torch.Tensor,
                           slice_idx: slice,

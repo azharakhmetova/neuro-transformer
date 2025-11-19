@@ -83,12 +83,9 @@ class CrossAttention(nn.Module):
         self.attend = nn.Softmax(dim=-1)
         self.dropout = nn.Dropout(p=dropout)
 
-        self.projection = nn.Sequential(
-            nn.Linear(in_features=dim_head*self.heads, out_features=emb_dim, bias=use_bias),
-            nn.Dropout(p=dropout),
-        )
 
     def mha(self, q: torch.Tensor, inputs: torch.Tensor, output_attn_weights: bool = False):
+        # q_res = q
         q = self.layer_norm(q) # [B, N_query_neurons, emb_dim]
         inputs = self.layer_norm_inputs(inputs) # [B, num_image_tokens, num_channels]
 
@@ -119,9 +116,8 @@ class CrossAttention(nn.Module):
         q = rearrange(q, "b n (h d) -> b h n d", h=self.heads)
 
         outputs = scaled_dot_product_attention(q=q, k=k, v=v, dropout=self.dropout.p, use_flash_attention=self.use_flash_attention)
-        outputs = rearrange(outputs, "b h n d -> b n (h d)")
-        outputs = self.projection(outputs) # [B, N_query_neurons, emb_dim]
-
+        outputs = rearrange(outputs, "b h n d -> b n (h d)") # [B, N_query_neurons, emb_dim]
+        # outputs = outputs + q_res
         if output_attn_weights:
             logits = torch.matmul(q, k.transpose(-1, -2)) * (k.size(-1) ** -0.5)
             attention_weights = logits.softmax(dim=-1)
@@ -190,8 +186,6 @@ class AttentionReadout(Readout):
 
         self.initialize_bias(stats=ds.dataset.response_stats)
         self.neuron_projection = nn.Linear(in_features=args.emb_dim_readout, out_features=1, bias=True)
-        # if use_bias:
-        #     nn.init.normal_(self.neuron_projection.weight, 0.0, 1e-3)
 
         # self.features = self.embedding = nn.Embedding(self.num_neurons, args.emb_dim_readout)
         # nn.init.constant_(self.embedding.weight, 1.0 / args.emb_dim_readout)

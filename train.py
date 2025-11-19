@@ -82,6 +82,8 @@ def train_step(
             reg_loss = (y_true.size(0) / batch_size) * model.regularizer(mouse_id)
             total_loss = loss + reg_loss
         scaler.scale(total_loss).backward()
+        # for n,p in model.named_parameters():
+        #     print(n, "grad_is_none:", p.grad is None)
         result["loss/loss"].append(loss.detach())
         result["loss/reg_loss"].append(reg_loss.detach())
         result["loss/total_loss"].append(total_loss.detach())
@@ -286,7 +288,7 @@ def main(args, wandb_sweep: bool = False):
         model = utils.compile(args, model=model)
 
     # utils.plot_samples(args, model=model, ds=train_ds, summary=summary, epoch=epoch)
-
+    print("number of input neurons:", next(iter(train_ds[args.mouse_ids[0]]))["input_neuron_ids"].shape)
     while (epoch := epoch + 1) < args.epochs + 1:
         if args.verbose:
             print(f"\nEpoch {epoch:03d}/{args.epochs:03d}")
@@ -606,6 +608,7 @@ if __name__ == "__main__":
     parser.add_argument("--emb_dim_image", type=int, default=156)
     parser.add_argument("--subselect_image_tokens", action="store_true", help="subselect only image tokens from the core output to pass to the readout.")
 
+    parser.add_argument("--no_shuffle", action="store_true", help="do not shuffle the training data.")
     # positional embeddings settings for image tokens or image-related tokens of the core's output
     parser.add_argument(
         "--pe_before_SA", 
@@ -657,7 +660,7 @@ if __name__ == "__main__":
         parser.add_argument("--self_attend_input_neurons", action="store_true", help="use self-attention on input neurons before the core module.")
         # parser.add_argument("--query_neuron_pe_mode", type=str, default="coord", choices=["1d", "coord"])
         parser.add_argument("--use_mode_emb", action="store_true", help="use mode embedding on image & neuron tokens in the core.")
-
+        
     # hyper-parameters for core module
     match temp_args.core:
         case "conv":

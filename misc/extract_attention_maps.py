@@ -1,3 +1,5 @@
+import sys
+# sys.path.insert(0, "/srv/user/azhar.akhmetova/corrViT/stabilize-training/src")
 import os
 import torch
 import pickle
@@ -18,10 +20,9 @@ def extract(ds: t.Dict[str, DataLoader], model: Model, num_samples: int = None, 
     for mouse_id, mouse_ds in ds.items():
         # if mouse_id in ("S0", "S1"):
         #     continue
-        if mouse_id == "k_4_a_03_b1e7_poisson":
-            results[mouse_id] = extract_attention_maps(
-                ds=mouse_ds, model=model, num_samples=num_samples, device=device
-            )
+        results[mouse_id] = extract_attention_maps(
+            ds=mouse_ds, model=model, num_samples=num_samples, device=device
+        )
     return results
 
 
@@ -54,7 +55,7 @@ def main(args):
     print(f"\nExtract attention rollout maps from test set.")
     results["test"] = extract(ds=test_ds, model=model, num_samples=args.num_samples, device=args.device)
 
-    filename = os.path.join(args.output_dir, "attention_rollout_maps_no_transpose.pkl")
+    filename = os.path.join(args.output_dir, "attention_rollout_maps_no_transpose_debug.pkl")
     with open(filename, "wb") as file:
         pickle.dump(results, file)
     print(f"Saved attention maps to {filename}.")

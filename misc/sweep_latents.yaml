@@ -1,0 +1,51 @@
+program: decoding_latents_pytorch.py
+method: bayes
+run_cap: 10
+early_terminate:
+  type: hyperband
+  min_iter: 5
+metric:
+  name: val_loss
+  goal: minimize
+parameters:
+  lr:
+    distribution: log_uniform_values
+    min: 3e-4
+    max: 3e-3
+  # weight_decay:
+  #   distribution: log_uniform_values
+  #   min: 1e-5
+  #   max: 1e-2
+  l1_reg:
+    distribution: log_uniform_values
+    min: 1e-6
+    max: 1e-2
+  # ds_pooling:
+  #   values: ["max"]   # or ["none","mean","max","min"]
+
+command:
+  - ${env}
+  - python
+  - ${program}
+  - --select_frac_neurons
+  - 0.05
+  - --batch_size
+  - 256
+  - --ds_pooling
+  - none
+  - --learned_pooling
+  - attention
+  - --reg_type
+  - lasso
+  - --dataset
+  - /user/azhar.akhmetova/corrViT/refactor/data/sensorium
+  - --output_dir
+  - /user/azhar.akhmetova/corrViT/runs_debug/analysis/k_4_xyz_no_subselect_fixed/k_4_a_03_xyz_nosubsel_1dLL_lrx04_meanbias_s_1_frac0_5_2dpe_bef_core
+  - --latents_path
+  - /user/azhar.akhmetova/sensorium_clusters/syn_data_generation/beta10e7/23343-5-17/xyz/k_4/z_k_4_no_train_dupl.npy
+  - --device
+  - cuda:6
+  - --representation_type
+  - after_core
+  - ${args}   # 👈 THIS injects: --lr <...> --weight_decay <...> --l1_reg <...> --ds_pooling <...> --batch_size <...>
+

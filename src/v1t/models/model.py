@@ -85,15 +85,16 @@ class Model(nn.Module):
                 self.sessions_enc[s] = torch.Tensor([i]).long().to(args.device)
 
             self.use_query_neuron_pe = args.use_query_neuron_pe
-        
-            self.neuron_pe_mode  = args.neuron_pe_mode
-            if self.neuron_pe_mode in ("1d", "both"):
-                self.neuron_pe = PositionalEncoding(
-                    d_model=args.emb_dim_neuron_id,
-                    mode="1d",
-                    )
-            if self.neuron_pe_mode in ("coord", "both"):
-                self.neuron_coord_pe = nn.Linear(3, args.emb_dim_neuron_id)
+            self.use_input_neuron_pe = args.use_input_neuron_pe
+            if self.use_query_neuron_pe and not self.use_input_neuron_pe:
+                self.neuron_pe_mode  = args.neuron_pe_mode
+                if self.neuron_pe_mode in ("1d", "both"):
+                    self.neuron_pe = PositionalEncoding(
+                        d_model=args.emb_dim_neuron_id,
+                        mode="1d",
+                        )
+                if self.neuron_pe_mode in ("coord", "both"):
+                    self.neuron_coord_pe = nn.Linear(3, args.emb_dim_neuron_id)
 
             # add input neurons tokenization
             if self.frac_input_neurons > 0.0:                  
@@ -108,20 +109,21 @@ class Model(nn.Module):
                                             use_masking=None,
                                             )
                 
-                self.use_input_neuron_pe = args.use_input_neuron_pe
-                if self.neuron_pe_mode in ("1d", "both"):
-                    self.neuron_pe = PositionalEncoding(
-                        d_model=args.emb_dim_input_neurons,
-                        mode="1d",
-                        )
-                if self.neuron_pe_mode in ("coord", "both"):
-                    self.neuron_coord_pe = nn.Linear(3, args.emb_dim_input_neurons)
+                
+                if self.use_input_neuron_pe:
+                    if self.neuron_pe_mode in ("1d", "both"):
+                        self.neuron_pe = PositionalEncoding(
+                            d_model=args.emb_dim_input_neurons,
+                            mode="1d",
+                            )
+                    if self.neuron_pe_mode in ("coord", "both"):
+                        self.neuron_coord_pe = nn.Linear(3, args.emb_dim_input_neurons)
 
-                # if we want to add neuronal pos emb to query neuron tokens, 
-                # they are projected to id emb dim, if emb_dim_input_neurons != emb_dim_n_id
-                self.project_query_pe = args.emb_dim_input_neurons != args.emb_dim_neuron_id
-                if self.project_query_pe:
-                    self.projection_query_pe = nn.Linear(args.emb_dim_input_neurons, args.emb_dim_neuron_id)
+                    # if we want to add neuronal pos emb to query neuron tokens, 
+                    # they are projected to id emb dim, if emb_dim_input_neurons != emb_dim_n_id
+                    self.project_query_pe = args.emb_dim_input_neurons != args.emb_dim_neuron_id
+                    if self.project_query_pe:
+                        self.projection_query_pe = nn.Linear(args.emb_dim_input_neurons, args.emb_dim_neuron_id)
                 
                 
                 if self.self_attend_input_neurons:
@@ -233,21 +235,29 @@ class Model(nn.Module):
                         }
                     )
 
-            if self.neuron_pe_mode in ("1d", "both"):
-                params.append(
-                    {
-                        "params": self.neuron_pe.parameters(),
-                        "name": "neuron_fixed_positional_embeddings",
-                    }
-                )
-            if self.neuron_pe_mode in ("coord", "both"):
-                params.append(
-                    {
-                        "params": self.neuron_coord_pe.parameters(),
-                        "name": "neuron_coordinate_positional_embeddings",
-                    }
-                )
-            
+            if self.use_query_neuron_pe or self.use_input_neuron_pe:
+                if self.neuron_pe_mode in ("1d", "both"):
+                    params.append(
+                        {
+                            "params": self.neuron_pe.parameters(),
+                            "name": "neuron_fixed_positional_embeddings",
+                        }
+                    )
+                if self.neuron_pe_mode in ("coord", "both"):
+                    params.append(
+                        {
+                            "params": self.neuron_coord_pe.parameters(),
+                            "name": "neuron_coordinate_positional_embeddings",
+                        }
+                    )
+                if self.project_query_pe:
+                    params.append(
+                        {
+                            "params": self.projection_query_pe.parameters(),
+                            "name": "projection_query_pe",
+                        }
+                    )
+
         params.append(
             {
                 "params": self.patch_embedding.parameters(),
@@ -255,7 +265,13 @@ class Model(nn.Module):
                 "name": "patch_embedding",
             }
         )
-
+        if self.self_attend_image_tokens:
+            params.append(
+                {
+                    "params": self.image_tokens_attention.parameters(),
+                    "name": "image_tokens_attention",
+                }
+            )
         if not self.core.frozen:
             params.append(
                 {
@@ -275,13 +291,6 @@ class Model(nn.Module):
                 {
                     "params": self.image_cropper.parameters(),
                     "name": "image_cropper",
-                }
-            )
-        if self.self_attend_image_tokens:
-            params.append(
-                {
-                    "params": self.image_tokens_attention.parameters(),
-                    "name": "image_tokens_attention",
                 }
             )
 
@@ -329,7 +338,6 @@ class Model(nn.Module):
         input_neuron_ids: torch.Tensor = None,
         query_neuron_ids: torch.Tensor = None,
         neuron_coords: torch.Tensor = None,
-        save_input_neuron_scores: bool = False,
         activate: bool = True,
     ):
         images, image_grids = self.image_cropper(

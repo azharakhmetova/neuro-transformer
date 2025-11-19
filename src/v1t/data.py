@@ -517,7 +517,6 @@ class MiceDataset(Dataset):
         return data
 
 def collate_with_neuron_ids(batch, args, dataset):
-    fixed = (dataset.tier == "test" or dataset.tier == "final_test") 
     # def collate(batch):
     batch = default_collate(batch)  # now batch["response"]: (B, N)
     B, N = batch["response"].shape
@@ -526,12 +525,15 @@ def collate_with_neuron_ids(batch, args, dataset):
         batch["query_neuron_ids"] = None
         return batch
     
+    # all neurons as query neurons
     if args.tokenize_neurons and args.frac_input_neurons == 0.0:
         batch["input_neuron_ids"] = None
         batch["query_neuron_ids"] = torch.arange(N).to(batch["response"].device)      
         return batch
-    
+    # number of input neurons
     K = int(args.frac_input_neurons * N)
+    # generate fixed permutation for test and final_test sets otherwise split is random for each batch
+    fixed = (dataset.tier == "test" or dataset.tier == "final_test") 
     if fixed:
         perm = dataset.get_fixed_perm().to(batch["response"].device)
     else:
@@ -540,6 +542,7 @@ def collate_with_neuron_ids(batch, args, dataset):
     batch["input_neuron_ids"] = perm[:K]
     batch["query_neuron_ids"] = perm[K:]
 
+    # sanity check that there is no overlap between input and query neurons
     if args.tokenize_neurons and args.frac_input_neurons > 0:
         assert not torch.isin(batch["input_neuron_ids"], batch["query_neuron_ids"]).any(), "input ∩ query overlap!"
     # if K == N:
@@ -594,7 +597,7 @@ def get_training_ds(
         val_collate   = partial(collate_with_neuron_ids, args=args, dataset=val_dataset)
         test_collate  = partial(collate_with_neuron_ids, args=args, dataset=test_dataset)
 
-        train_ds[mouse_id] = DataLoader(train_dataset, collate_fn=train_collate, shuffle=True,  **dataloader_kwargs)
+        train_ds[mouse_id] = DataLoader(train_dataset, collate_fn=train_collate, shuffle=True if not args.no_shuffle else False,  **dataloader_kwargs)
         val_ds[mouse_id]   = DataLoader(val_dataset,   collate_fn=val_collate,   shuffle=False, **dataloader_kwargs)
         test_ds[mouse_id]  = DataLoader(test_dataset,  collate_fn=test_collate,  shuffle=False, **dataloader_kwargs)
 

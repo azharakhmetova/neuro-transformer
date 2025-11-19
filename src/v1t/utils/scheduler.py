@@ -131,7 +131,9 @@ class Scheduler:
             # directly calling model.load_state_dict(ckpt['model'])
             state_dict = self.model.state_dict()
             state_dict.update(ckpt["model"])
-            self.model.load_state_dict(state_dict)
+            missing, unexpected = self.model.load_state_dict(state_dict, strict=False)
+            print("Missing:", missing)
+            print("Unexpected:", unexpected)
             if load_optimizer and "optimizer" in ckpt:
                 self.optimizer.load_state_dict(ckpt["optimizer"])
                 if self.scaler is not None and "scaler" in ckpt:
