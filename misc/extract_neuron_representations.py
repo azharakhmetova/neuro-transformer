@@ -36,7 +36,7 @@ def extract(
         if repr_type == "initial":
             out_dir = os.path.join(run_dir, "neuron_token_representations", mouse_id, repr_type, tier)
         elif repr_type == "after_sa":
-            out_dir = os.path.join(run_dir, "neuron_token_representations", mouse_id, repr_type, tier)
+            out_dir = os.path.join(run_dir, "neuron_token_representations", mouse_id, repr_type, f"sel_frac_{frac}", tier)
         else:
             out_dir = os.path.join(run_dir, "neuron_token_representations", mouse_id, repr_type, f"sel_frac_{frac}", tier)
         os.makedirs(out_dir, exist_ok=True)
@@ -75,8 +75,10 @@ def main(args):
     elif args.representation_type == "after_sa":
         print(f"Extracting all neuron representations after SA for the model trained with {args.frac_input_neurons} input neurons.")
         args.fract_input_neurons = args.select_frac_neurons
-    else:
+    elif args.representation_type == "after_core":
         print(f"Extracting intermediate representations of {args.select_frac_neurons} input neurons for the model trained with {args.frac_input_neurons} input neurons.")
+    elif args.representation_type == "queries":
+        print(f"Extracting query representations of {1-args.select_frac_neurons} query neurons for the model trained with {args.frac_input_neurons} input neurons.")
 
     num_samples = args.num_trials if args.num_trials is not None else None
     print("num_samples:", num_samples)
@@ -89,6 +91,7 @@ def main(args):
         query_indices = torch.tensor(neuron_data['query_neuron_indices'], dtype=torch.long)
         print(f"Loaded input/query neuron indices from {file_path}")
         print("input_indices:", input_indices)
+        print("query_indices:", query_indices)
     except FileNotFoundError:
         input_indices = None
         query_indices = None

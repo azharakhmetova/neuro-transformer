@@ -48,10 +48,10 @@ tensorboard.set_font()
 #     print(f"Selected {n_neurons}/{N} neurons ({neuron_fraction*100:.1f}%) with seed {neuron_seed}")
 #     return selected_indices, N
 
-def get_neuron_indices(rep_dir, neuron_fraction=1.0, neuron_seed=42, save_folder=None):
+def get_neuron_indices(rep_dir, neuron_fraction=1.0, neuron_seed=42, idx_folder=None, save_folder=None):
     """Get neuron indices for nested subsampling"""
     # Try to load existing indices
-    if save_folder is not None:
+    if idx_folder is not None:
         file_path = os.path.join(save_folder, f"input_frac_{neuron_fraction:.3f}_seed_{neuron_seed}.pkl")
         try:
             with open(file_path, 'rb') as f:
@@ -76,44 +76,46 @@ def get_neuron_indices(rep_dir, neuron_fraction=1.0, neuron_seed=42, save_folder
             
         except (FileNotFoundError, KeyError, pickle.UnpicklingError) as e:
             print(f"Could not load existing indices ({e}), generating new ones...")
+    else:
+        print("No idx_folder provided, generating new neuron indices...")
 
-    train_dir = os.path.join(rep_dir, 'train')
-    first_file = os.listdir(train_dir)[0]
-    first_arr = np.load(os.path.join(train_dir, first_file), mmap_mode='r')
-    N = first_arr.shape[1]  # number of neurons
-    
-    # create nested neuron indices (reproducible)
-    np.random.seed(neuron_seed)
-    all_indices = np.random.permutation(N)
-    n_neurons = int(N * neuron_fraction)
-
-    # input neurons
-    input_indices = np.sort(all_indices[:n_neurons])
-
-    # complement = query neurons
-    mask = np.ones(N, dtype=bool)
-    mask[input_indices] = False
-    query_indices = np.nonzero(mask)[0]
-
-    print(f"Selected {n_neurons}/{N} neurons ({neuron_fraction*100:.1f}%) "
-        f"with seed {neuron_seed}")
-    if save_folder is not None:
-        neuron_data = {
-            'input_neuron_indices': input_indices,
-            'query_neuron_indices': query_indices,
-            'neuron_fraction': neuron_fraction,
-            'neuron_seed': neuron_seed,
-            'total_neurons': N,
-            'n_selected': n_neurons
-        }
+        train_dir = os.path.join(rep_dir, 'train')
+        first_file = os.listdir(train_dir)[0]
+        first_arr = np.load(os.path.join(train_dir, first_file), mmap_mode='r')
+        N = first_arr.shape[1]  # number of neurons
         
-        # Create filename
-        filename = f"input_frac_{neuron_fraction:.3f}_seed_{neuron_seed}.pkl"
-        filepath = os.path.join(save_folder, filename)
-        os.makedirs(save_folder, exist_ok=True)
-        
-        with open(filepath, 'wb') as f:
-            pickle.dump(neuron_data, f)
+        # create nested neuron indices (reproducible)
+        np.random.seed(neuron_seed)
+        all_indices = np.random.permutation(N)
+        n_neurons = int(N * neuron_fraction)
+
+        # input neurons
+        input_indices = np.sort(all_indices[:n_neurons])
+        # complement = query neurons
+        query_indices = np.sort(all_indices[n_neurons:])
+        # mask = np.ones(N, dtype=bool)
+        # mask[input_indices] = False
+        # query_indices = np.nonzero(mask)[0]
+
+        print(f"Selected {n_neurons}/{N} neurons ({neuron_fraction*100:.1f}%) "
+            f"with seed {neuron_seed}")
+        if save_folder is not None:
+            neuron_data = {
+                'input_neuron_indices': input_indices,
+                'query_neuron_indices': query_indices,
+                'neuron_fraction': neuron_fraction,
+                'neuron_seed': neuron_seed,
+                'total_neurons': N,
+                'n_selected': n_neurons
+            }
+            
+            # Create filename
+            filename = f"input_frac_{neuron_fraction:.3f}_seed_{neuron_seed}.pkl"
+            filepath = os.path.join(save_folder, filename)
+            os.makedirs(save_folder, exist_ok=True)
+            
+            with open(filepath, 'wb') as f:
+                pickle.dump(neuron_data, f)
     return input_indices, query_indices, N
 
 
@@ -578,6 +580,7 @@ def run_training_with_early_stopper(args, model, optimizer, scheduler, loss_func
             else:
                 counter -= 1
                 if counter == 0:
+                    print(f"Early stopping at epoch {epoch}. Best val loss: {best_epoch_val_loss:.4f} at epoch {best_epoch}.")
                     break
         wandb.run.summary["best_val_loss"] = best_epoch_val_loss
 
@@ -621,7 +624,7 @@ def main(args):
         rep_dir = args.output_dir  + "/neuron_token_representations/k_4_a_03_xyz_b1e7_poisson/" + args.representation_type + f"/sel_frac_{args.select_frac_neurons}"
     latents_path = args.latents_path
     if args.representation_type == "initial":
-        neuron_indices, query_indices, N = get_neuron_indices(rep_dir, neuron_fraction=args.select_frac_neurons, neuron_seed=42)
+        neuron_indices, query_indices, N = get_neuron_indices(rep_dir, neuron_fraction=args.select_frac_neurons, neuron_seed=42, idx_folder=args.idx_folder)
     else:
         neuron_indices = None
 
@@ -668,9 +671,9 @@ def main(args):
                 )
     N = train_ds[mouse_id].__getitem__(0)[0].shape[0] if ds_pooling == "none" else train_ds[mouse_id].N
     print(f"Total neurons N: {N}")
-    train_loader[mouse_id] = DataLoader(train_ds[mouse_id], batch_size=args.batch_size, shuffle=True, drop_last=False)
-    val_loader[mouse_id] = DataLoader(val_ds[mouse_id], batch_size=args.batch_size, shuffle=False, drop_last=False)
-    test_loader[mouse_id] = DataLoader(test_ds[mouse_id], batch_size=args.batch_size, shuffle=False, drop_last=False)
+    train_loader[mouse_id] = DataLoader(train_ds[mouse_id], batch_size=args.batch_size, shuffle=True, num_workers=4, drop_last=False)
+    val_loader[mouse_id] = DataLoader(val_ds[mouse_id], batch_size=args.batch_size, shuffle=False, num_workers=4, drop_last=False)
+    test_loader[mouse_id] = DataLoader(test_ds[mouse_id], batch_size=args.batch_size, shuffle=False, num_workers=4, drop_last=False)
 
     
     input_dim = train_ds[mouse_id].__getitem__(0)[0].shape[-1]
@@ -849,8 +852,9 @@ if __name__ == "__main__":
     parser.add_argument("--output_dir", type=str, required=True)
     parser.add_argument("--batch_size", type=int, default=1)
     parser.add_argument("--device", type=str, default="cpu")
+    parser.add_argument("--idx_folder", type=str, default="/user/azhar.akhmetova/corrViT/analysis/misc/analysis/neuron_indices")
 
-    parser.add_argument("--representation_type", type=str, default="initial", choices=["initial", "after_sa", "after_core"])
+    parser.add_argument("--representation_type", type=str, default="initial", choices=["initial", "after_sa", "after_core", "queries"])
     parser.add_argument("--select_frac_neurons", type=float, default=1.0, help="Fraction of neurons to select for decoding")
     parser.add_argument("--latents_path", type=str, required=True, help="Path to latents .npy file")
     parser.add_argument("--reg_type", type=str, default="ridge", choices=["ridge", "lasso", "elasticnet"], help="Type of regularization for linear model")

@@ -74,7 +74,6 @@ def extract_attention_maps(
         # core (rollout)
         "core_image_rollout_maps": [],              # [B, L, H_img, W_img] rollout or diag-like
         "core_neuron_to_image_rollout_maps": [],        # [B, L, K, H_img, W_img] 
-        "core_image_to_neuron_rollout_maps": [],        # [B, L, P, K] 
         "core_neuron_to_neuron_rollout_maps": [],       # [B, L, K, K]
         # core (last layer)
         "core_neuron_to_image_maps": [],        # [B, K, H_img, W_img]

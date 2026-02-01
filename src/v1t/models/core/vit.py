@@ -138,18 +138,25 @@ class Attention(nn.Module):
     def mha(self, inputs: torch.Tensor, output_attn_weights: bool = False):
         inputs = self.layer_norm(inputs)
         q, k, v = torch.chunk(self.to_qkv(inputs), chunks=3, dim=-1)
+        if output_attn_weights:
+            q_h, k_h, v_h = self.rearrange(q), self.rearrange(k), self.rearrange(v)
+            d = q_h.size(-1)
+            scale = d ** -0.5
+
+            logits = torch.matmul(q_h, k_h.transpose(-1, -2)) * scale    # [B, H, N, N]
+            attn = logits.softmax(dim=-1)                                 # [B, H, N, N]
+            attn = self.dropout(attn)
+
+            out_h = torch.matmul(attn, v_h)                               # [B, H, N, D_head]
+            outputs = rearrange(out_h, "b h n d -> b n (h d)")            # [B, N, emb_dim]
+            outputs = self.projection(outputs)
+            attn.retain_grad()
+            return outputs, attn
         outputs = scaled_dot_product_attention(
             q=self.rearrange(q), k=self.rearrange(k), v=self.rearrange(v), dropout=self.dropout.p, use_flash_attention=self.use_flash_attention,
         )
         outputs = rearrange(outputs, "b h n d -> b n (h d)")
         outputs = self.projection(outputs)
-        
-        if output_attn_weights:
-            q_h, k_h = self.rearrange(q), self.rearrange(k)
-            logits = torch.matmul(q_h, k_h.transpose(-1, -2)) * (k_h.size(-1) ** -0.5)
-            attention_weights = logits.softmax(dim=-1)
-            return outputs, attention_weights
-        
         return outputs
 
     def forward(self, inputs: torch.Tensor, output_attn_weights: bool = False):
@@ -231,10 +238,12 @@ class Transformer(nn.Module):
         inputs: torch.Tensor,
         mouse_id: str,
         behaviors: torch.Tensor,
-        output_attn_weights: bool = False
+        output_attn_weights: bool = False,
+        return_layer_tokens: bool = False,
     ):
         outputs = inputs
         attn_list = []
+        layer_tokens = []
         for block in self.blocks:
             if "b-mlp" in block:
                 b_latent = block["b-mlp"](behaviors, mouse_id=mouse_id)
@@ -242,17 +251,23 @@ class Transformer(nn.Module):
                 outputs = outputs + b_latent
             if output_attn_weights:
                 y, attn = block["mha"](outputs, output_attn_weights=output_attn_weights)
-                outputs = self.drop_path(y) + outputs          
+                outputs = self.drop_path(y) + outputs       
                 attn_list.append(attn)       
             else:
                 outputs = self.drop_path(block["mha"](outputs)) + outputs
             outputs = self.drop_path(block["mlp"](outputs)) + outputs
+
+            if return_layer_tokens:
+                layer_tokens.append(outputs)
         # outputs: (1, num_tokens, emb_dim)
         if output_attn_weights:
             # stack along layer dim -> [B, L, H, N, N]
             attn_weights = torch.stack(attn_list, dim=1)
+            if return_layer_tokens:
+                return outputs, attn_weights, layer_tokens  # list of length L, each [B, S, C]
             return outputs, attn_weights
-        
+        if return_layer_tokens:
+            return outputs, layer_tokens
         return outputs
 
 
@@ -338,6 +353,7 @@ class ViTCore(Core):
         behaviors: torch.Tensor,
         pupil_centers: torch.Tensor,
         output_attn_weights: bool = False,
+        return_layer_tokens: bool = False,
     ):
         if self.project_image:
             image_tokens = self.image_projection(image_tokens)
@@ -356,9 +372,19 @@ class ViTCore(Core):
         if self.behavior_mode in (3, 4):
             behaviors = torch.cat((behaviors, pupil_centers), dim=-1)
         if output_attn_weights:
-            outputs, attn_weights = self.transformer(outputs, mouse_id=mouse_id, behaviors=behaviors, output_attn_weights=output_attn_weights)
+            if return_layer_tokens:
+                outputs, attn_weights, layer_tokens = self.transformer(
+                    outputs, mouse_id=mouse_id, behaviors=behaviors, output_attn_weights=output_attn_weights, return_layer_tokens=return_layer_tokens
+                )
+            else:
+                outputs, attn_weights = self.transformer(outputs, mouse_id=mouse_id, behaviors=behaviors, output_attn_weights=output_attn_weights)
         else:
-            outputs = self.transformer(outputs, mouse_id=mouse_id, behaviors=behaviors, output_attn_weights=output_attn_weights)
+            if return_layer_tokens:
+                outputs, layer_tokens = self.transformer(
+                    outputs, mouse_id=mouse_id, behaviors=behaviors, return_layer_tokens=return_layer_tokens
+                )
+            else:
+                outputs = self.transformer(outputs, mouse_id=mouse_id, behaviors=behaviors, output_attn_weights=output_attn_weights)
         # subselect only image patches because they represent 'receptive fields' of neurons and can be optionally conditioned on input neuron tokens
         if self.subselect_image_tokens:
             outputs = outputs[:, :self.num_image_patches, :] 
@@ -366,7 +392,10 @@ class ViTCore(Core):
         if self.readout == "gaussian2d":
             outputs = self.rearrange(outputs)
         
-        if output_attn_weights:
+        if output_attn_weights and return_layer_tokens:
+            return outputs, attn_weights, layer_tokens
+        elif output_attn_weights:
             return outputs, attn_weights
-        
+        elif return_layer_tokens:
+            return outputs, layer_tokens
         return outputs

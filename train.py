@@ -603,7 +603,7 @@ if __name__ == "__main__":
         "4 - shift_mode=3 and provide both behavior and pupil center to cropper",
     )
     # parser.add_argument("--regularized_training", action="store_true", help="use regularized training with fraction of input neurons fixed during training.")
-    parser.add_argument("--scheduled_training", action="store_true", help="use scheduled training with fraction of input neurons increasing with training steps.")
+    parser.add_argument("--scheduled_training", action="store_true", help="use scheduled training with fraction of input neurons increasing with training steps or random fraction.")
     parser.add_argument("--tokenize_neurons", action="store_true")
     parser.add_argument("--emb_dim_image", type=int, default=156)
     parser.add_argument("--subselect_image_tokens", action="store_true", help="subselect only image tokens from the core output to pass to the readout.")

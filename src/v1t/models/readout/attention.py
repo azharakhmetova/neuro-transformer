@@ -114,14 +114,20 @@ class CrossAttention(nn.Module):
             v = rearrange(inputs, "b s (h d) -> b h s d", h=self.heads)
 
         q = rearrange(q, "b n (h d) -> b h n d", h=self.heads)
-
+        
+        if output_attn_weights:
+            d = k.size(-1)
+            scale = d ** -0.5
+            logits = torch.matmul(q, k.transpose(-1, -2)) * scale      # [B, H, Nq, S]
+            attn_probs = logits.softmax(dim=-1)                         # [B, H, Nq, S]
+            attn_probs = self.dropout(attn_probs)
+            out = torch.matmul(attn_probs, v)                           # [B, H, Nq, D_head]
+            out = rearrange(out, "b h n d -> b n (h d)")                # [B, Nq, emb_dim]
+            return out, attn_probs
         outputs = scaled_dot_product_attention(q=q, k=k, v=v, dropout=self.dropout.p, use_flash_attention=self.use_flash_attention)
         outputs = rearrange(outputs, "b h n d -> b n (h d)") # [B, N_query_neurons, emb_dim]
         # outputs = outputs + q_res
-        if output_attn_weights:
-            logits = torch.matmul(q, k.transpose(-1, -2)) * (k.size(-1) ** -0.5)
-            attention_weights = logits.softmax(dim=-1)
-            return outputs, attention_weights
+
         return outputs
 
     def forward(self, q: torch.Tensor, inputs: torch.Tensor, output_attn_weights: bool = False):

@@ -339,6 +339,7 @@ class Model(nn.Module):
         query_neuron_ids: torch.Tensor = None,
         neuron_coords: torch.Tensor = None,
         activate: bool = True,
+        output_attn_weights: bool = False,
     ):
         images, image_grids = self.image_cropper(
             images,
@@ -348,8 +349,14 @@ class Model(nn.Module):
         )
 
         image_tokens = self.patch_embedding(images) 
+        images_self_attn = None
         if self.self_attend_image_tokens:
-            image_tokens = self.image_tokens_attention(image_tokens)
+            if output_attn_weights:
+                image_tokens, images_self_attn = self.image_tokens_attention(
+                image_tokens, output_attn_weights=output_attn_weights
+                )
+            else:
+                image_tokens = self.image_tokens_attention(image_tokens)
 
         if self.tokenize_neurons and input_neuron_ids is not None and self.frac_input_neurons > 0.0:
             # add time dimension for image responses
@@ -373,8 +380,14 @@ class Model(nn.Module):
                 elif self.neuron_pe_mode == "both":
                     input_coords = neuron_coords[:, input_neuron_ids, :]  
                     input_neuron_tokens += (self.neuron_pe(responses)[:, input_neuron_ids, :] + self.neuron_coord_pe(input_coords))
+            
+            input_neurons_attn = None
             if self.self_attend_input_neurons:
-                input_neuron_tokens = self.input_neurons_attention(input_neuron_tokens)  # (B, K, emb_dim_input_neurons)
+                if output_attn_weights:
+                    input_neuron_tokens, input_neurons_attn = self.input_neurons_attention(input_neuron_tokens, output_attn_weights=output_attn_weights)
+                else:
+                    input_neuron_tokens = self.input_neurons_attention(input_neuron_tokens)  # (B, K, emb_dim_input_neurons)
+                # add positional encoding after self-attention
                 if self.use_input_neuron_pe:
                     if self.neuron_pe_mode == "1d":
                         # print(self.neuron_pe(responses).shape)
@@ -389,14 +402,23 @@ class Model(nn.Module):
         else:
             input_neuron_tokens = None
         
-
-        outputs = self.core(    # (B, num_tokens, num_channels)
-            image_tokens=image_tokens,
-            neuron_tokens=input_neuron_tokens,
-            mouse_id=mouse_id,
-            behaviors=behaviors,
-            pupil_centers=pupil_centers,
-        )
+        if output_attn_weights:
+            outputs, core_attn_weights = self.core(
+                image_tokens=image_tokens,
+                neuron_tokens=input_neuron_tokens,
+                mouse_id=mouse_id,
+                behaviors=behaviors,
+                pupil_centers=pupil_centers,
+                output_attn_weights=output_attn_weights,
+            )
+        else:
+            outputs = self.core(    # (B, num_tokens, num_channels)
+                image_tokens=image_tokens,
+                neuron_tokens=input_neuron_tokens,
+                mouse_id=mouse_id,
+                behaviors=behaviors,
+                pupil_centers=pupil_centers,
+            )
 
         if self.subselect_image_tokens:
             # CHANGE LEARNABLE CASE and remove it from attention readout
@@ -434,10 +456,25 @@ class Model(nn.Module):
                         query_neurons += (self.projection_query_pe(self.neuron_coord_pe(query_coords)) + self.projection_query_pe(self.neuron_pe(responses)[:, query_neuron_ids, :]))
                     else:
                         query_neurons += (self.neuron_coord_pe(query_coords) + self.neuron_pe(responses)[:, query_neuron_ids, :])
-        outputs = self.readouts(outputs, mouse_id=mouse_id, query_neurons=query_neurons, query_neuron_ids=query_neuron_ids, shifts=shifts) # (B, num_neurons)
+            if output_attn_weights:
+                outputs, readout_attn_weights = self.readouts(outputs, mouse_id=mouse_id, query_neurons=query_neurons, query_neuron_ids=query_neuron_ids, shifts=shifts, output_attn_weights=output_attn_weights) # (B, num_neurons)
+            else:
+                outputs = self.readouts(outputs, mouse_id=mouse_id, query_neurons=query_neurons, query_neuron_ids=query_neuron_ids, shifts=shifts) # (B, num_neurons)
+        else:
+            outputs = self.readouts(outputs, mouse_id=mouse_id, shifts=shifts)  # (B, num_neurons)
         # print("model readout output shape: ", outputs.shape)
         if activate:
             outputs = self.elu1(outputs)
+        if output_attn_weights:
+            return outputs, {
+                "core_attn": core_attn_weights,
+                "readout_attn": readout_attn_weights,
+                "images_self_attn": images_self_attn if self.self_attend_image_tokens else None,
+                "input_neurons_attn": input_neurons_attn if (self.self_attend_input_neurons and self.frac_input_neurons > 0) else None,
+                "images": images,
+                "image_grids": image_grids,
+            }
+
         return outputs, images, image_grids
 
 

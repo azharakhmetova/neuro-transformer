@@ -169,7 +169,7 @@ def sample_neuron_tokens(
             output_attn_weights=False,
         )  # outputs: [B, S, C]; core_attn: [B, Layers, Heads, S, S] (S = P (+K))
         if repr_type == "after_core":
-            print("core output tokens:", outputs[:, P:].shape)
+            # print("core output tokens:", outputs[:, P:].shape)
             np.save(os.path.join(out_dir, f"{batch_idx}.npy"), outputs[:, P:].detach().cpu().numpy().astype(np.float32))
             batch_idx += 1
             continue
@@ -211,7 +211,7 @@ def sample_neuron_tokens(
             if readout.project_query_neurons: 
                 query_neurons = readout.id_query_projection(query_neurons)
             outputs = readout.cross_attention(q=query_neurons, inputs=outputs)
-            print("query neuron tokens:", outputs.shape)
+            # print("query neuron tokens:", outputs.shape)
             np.save(os.path.join(out_dir, f"{batch_idx}.npy"), outputs.detach().cpu().numpy().astype(np.float32))
             batch_idx += 1
             

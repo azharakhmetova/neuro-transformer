@@ -397,10 +397,10 @@ class MiceDataset(Dataset):
         g = torch.Generator(device="cpu").manual_seed(args.seed)
         self._fixed_perm = torch.randperm(self.num_neurons, generator=g, device="cpu")
     
-    def get_fixed_perm(self) -> torch.Tensor:
+    def get_fixed_perm(self, args) -> torch.Tensor:
         # ensure up-to-date length (in case num_neurons changes)
         if (self._fixed_perm is None) or (self._fixed_perm.numel() != self.num_neurons):
-            self._init_fixed_perm()
+            self._init_fixed_perm(args)
         return self._fixed_perm
 
     def __len__(self):
@@ -533,9 +533,9 @@ def collate_with_neuron_ids(batch, args, dataset):
     # number of input neurons
     K = int(args.frac_input_neurons * N)
     # generate fixed permutation for test and final_test sets otherwise split is random for each batch
-    fixed = (dataset.tier == "test" or dataset.tier == "final_test") 
+    fixed = (dataset.tier == "validation" or dataset.tier == "test" or dataset.tier == "final_test") 
     if fixed:
-        perm = dataset.get_fixed_perm().to(batch["response"].device)
+        perm = dataset.get_fixed_perm(args).to(batch["response"].device)
     else:
         perm = torch.randperm(N, device=batch["response"].device)
 
