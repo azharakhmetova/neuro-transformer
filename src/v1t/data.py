@@ -27,50 +27,47 @@ SENSORIUM = {
     "C": "static23343-5-17-GrayImageNet-94c6ff995dac583098847cfecd43e7b6",
     "D": "static23656-14-22-GrayImageNet-94c6ff995dac583098847cfecd43e7b6",
     "E": "static23964-4-22-GrayImageNet-94c6ff995dac583098847cfecd43e7b6",
-    "no_z_b1e7":                       "no_latent_beta1e7_rates",
-    "no_z_b1e7_poisson":               "no_latent_beta1e7_poisson",
-    "k_4_a_max_b1e7":                  "k_4_a_max_beta1e7_rates",
-    "k_4_a_max_b1e7_strat":            "k_4_a_max_beta1e7_rates_stratified",
-    "k_4_a_01_b1e7_poisson":           "k_4_a_01_beta1e7_poisson",
-    "k_4_a_03_b1e7_poisson":           "k_4_a_03_beta1e7_poisson",
-    "k_4_a_03_xyz_b1e7_poisson":       "k_4_a_03_xyz_beta1e7_poisson",
-    "k_4_a_05_b1e7_poisson":           "k_4_a_05_beta1e7_poisson",
-    "k_4_a_1_b1e7_poisson":            "k_4_a_1_beta1e7_poisson",
-    "k_4_a_1_b1e7_poisson_strat":      "k_4_a_1_beta1e7_poisson_stratified",
-    "k_4_a_2_b1e7_poisson":            "k_4_a_2_beta1e7_poisson",
-    "k_4_a_2_b1e7_poisson_strat":      "k_4_a_2_beta1e7_poisson_stratified",
-    "k_4_a_3_b1e7_poisson":            "k_4_a_3_beta1e7_poisson",
-    "k_4_a_3_b1e7_poisson_strat":      "k_4_a_3_beta1e7_poisson_stratified",
-    "k_4_a_5_b1e7_poisson":            "k_4_a_5_beta1e7_poisson",
-    "k_4_a_5_b1e7_poisson_strat":      "k_4_a_5_beta1e7_poisson_stratified",
-    "k_4_a_10_b1e7_poisson":           "k_4_a_10_beta1e7_poisson",
-    "k_4_a_10_b1e7_poisson_strat":     "k_4_a_10_beta1e7_poisson_stratified",
-    "k_4_a_max_b1e7_poisson":          "k_4_a_max_beta1e7_poisson",
-    "k_4_a_max_b1e7_poisson_strat":    "k_4_a_max_beta1e7_poisson_stratified",
-    "k_8_a_1_b1e7_poisson":            "k_8_a_1_beta1e7_poisson",
-    "k_8_a_1_b1e7_poisson_strat":      "k_8_a_1_beta1e7_poisson_stratified",
-    "k_8_a_2_b1e7_poisson":            "k_8_a_2_beta1e7_poisson",
-    "k_8_a_2_b1e7_poisson_strat":      "k_8_a_2_beta1e7_poisson_stratified",
-    "k_8_a_3_b1e7_poisson":            "k_8_a_3_beta1e7_poisson",
-    "k_8_a_3_b1e7_poisson_strat":      "k_8_a_3_beta1e7_poisson_stratified",
-    "k_8_a_5_b1e7_poisson":            "k_8_a_5_beta1e7_poisson",
-    "k_8_a_5_b1e7_poisson_strat":      "k_8_a_5_beta1e7_poisson_stratified",
-    "k_8_a_10_b1e7_poisson":           "k_8_a_10_beta1e7_poisson",
-    "k_8_a_10_b1e7_poisson_strat":     "k_8_a_10_beta1e7_poisson_stratified",
-    "k_8_a_max_b1e7_poisson":          "k_8_a_max_beta1e7_poisson",
-    "k_8_a_max_b1e7_poisson_strat":    "k_8_a_max_beta1e7_poisson_stratified",
-    "k_10_a_1_b1e7_poisson":           "k_10_a_1_beta1e7_poisson",
-    "k_10_a_1_b1e7_poisson_strat":     "k_10_a_1_beta1e7_poisson_stratified",
-    "k_10_a_2_b1e7_poisson":           "k_10_a_2_beta1e7_poisson",
-    "k_10_a_2_b1e7_poisson_strat":     "k_10_a_2_beta1e7_poisson_stratified",
-    "k_10_a_3_b1e7_poisson":           "k_10_a_3_beta1e7_poisson",
-    "k_10_a_3_b1e7_poisson_strat":     "k_10_a_3_beta1e7_poisson_stratified",
-    "k_10_a_5_b1e7_poisson":           "k_10_a_5_beta1e7_poisson",
-    "k_10_a_5_b1e7_poisson_strat":     "k_10_a_5_beta1e7_poisson_stratified",
-    "k_10_a_10_b1e7_poisson":          "k_10_a_10_beta1e7_poisson",
-    "k_10_a_10_b1e7_poisson_strat":    "k_10_a_10_beta1e7_poisson_stratified",
-    "k_10_a_max_b1e7_poisson":         "k_10_a_max_beta1e7_poisson",
-    "k_10_a_max_b1e7_poisson_strat":   "k_10_a_max_beta1e7_poisson_stratified",
+    # stimuli dominating regime
+    "k_4_a_0_b1e7_poisson":                    "k_4_a_0_beta1e7_poisson",
+    "k_4_a_0_b1e7_poisson_strat":              "k_4_a_0_beta1e7_poisson_stratified",
+    "k_8_a_0_b1e7_poisson":                    "k_8_a_0_beta1e7_poisson",
+    "k_8_a_0_b1e7_poisson_strat":              "k_8_a_0_beta1e7_poisson_stratified",
+    "k_16_a_0_b1e7_poisson":                   "k_16_a_0_beta1e7_poisson",
+    "k_16_a_0_b1e7_poisson_strat":             "k_16_a_0_beta1e7_poisson_stratified",
+    "k_24_a_0_b1e7_poisson":                   "k_24_a_0_beta1e7_poisson",
+    "k_24_a_0_b1e7_poisson_strat":             "k_24_a_0_beta1e7_poisson_stratified",
+    # mid regime: matching stimuli and latent variances
+    "k_4_a_056_b1e7_poisson":                    "k_4_a_056_beta1e7_poisson",
+    "k_4_a_056_b1e7_poisson_strat":              "k_4_a_056_beta1e7_poisson_stratified",
+    "k_8_a_056_b1e7_poisson":                    "k_8_a_056_beta1e7_poisson",
+    "k_8_a_056_b1e7_poisson_strat":              "k_8_a_056_beta1e7_poisson_stratified",
+    "k_16_a_056_b1e7_poisson":                   "k_16_a_056_beta1e7_poisson",
+    "k_16_a_056_b1e7_poisson_strat":             "k_16_a_056_beta1e7_poisson_stratified",
+    "k_24_a_056_b1e7_poisson":                   "k_24_a_056_beta1e7_poisson",
+    "k_24_a_056_b1e7_poisson_strat":             "k_24_a_056_beta1e7_poisson_stratified",
+    # mid regime: mean matching
+    "k_8_a_09_b1e7_poisson":                    "k_8_a_09_beta1e7_poisson",
+    "k_8_a_09_b1e7_poisson_strat":              "k_8_a_09_beta1e7_poisson_stratified",
+    "k_16_a_1_6_b1e7_poisson":                   "k_16_a_1_6_beta1e7_poisson",
+    "k_16_a_1_6_b1e7_poisson_strat":             "k_16_a_1_6_beta1e7_poisson_stratified",
+    "k_24_a_2_6_b1e7_poisson":                   "k_24_a_2_6_beta1e7_poisson",
+    "k_24_a_2_6_b1e7_poisson_strat":             "k_24_a_2_6_beta1e7_poisson_stratified",
+    # mid regime: histogram matching
+    "k_8_a_076_b1e7_poisson":                    "k_8_a_076_beta1e7_poisson",
+    "k_8_a_076_b1e7_poisson_strat":              "k_8_a_076_beta1e7_poisson_stratified",
+    "k_16_a_1_2_b1e7_poisson":                   "k_16_a_1_2_beta1e7_poisson",
+    "k_16_a_1_2_b1e7_poisson_strat":             "k_16_a_1_2_beta1e7_poisson_stratified",
+    "k_24_a_1_6_b1e7_poisson":                   "k_24_a_1_6_beta1e7_poisson",
+    "k_24_a_1_6_b1e7_poisson_strat":             "k_24_a_1_6_beta1e7_poisson_stratified",
+    # latent dominating regime
+    "k_4_a_max_b1e7_poisson":                    "k_4_a_max_beta1e7_poisson",
+    "k_4_a_max_b1e7_poisson_strat":              "k_4_a_max_beta1e7_poisson_stratified",
+    "k_8_a_max_b1e7_poisson":                    "k_8_a_max_beta1e7_poisson",
+    "k_8_a_max_b1e7_poisson_strat":              "k_8_a_max_beta1e7_poisson_stratified",
+    "k_16_a_max_b1e7_poisson":                   "k_16_a_max_beta1e7_poisson",
+    "k_16_a_max_b1e7_poisson_strat":             "k_16_a_max_beta1e7_poisson_stratified",
+    "k_24_a_max_b1e7_poisson":                   "k_24_a_max_beta1e7_poisson",
+    "k_24_a_max_b1e7_poisson_strat":             "k_24_a_max_beta1e7_poisson_stratified",
 }
 
 FRANKE2022 = {
@@ -193,23 +190,42 @@ def str2datetime(array: np.ndarray):
     fn = lambda s: np.datetime64(datetime.strptime(s[11:-2], "%Y-%m-%d %H:%M:%S"))
     return np.vectorize(fn)(array)
 
-
 def load_trial_data(
-    mouse_dir: str, trial: int, to_tensor: bool = False
-) -> t.Dict[str, t.Union[np.ndarray, torch.Tensor]]:
-    """Load data from a single trial in mouse_dir"""
-    filename, data_dir = f"{trial}.npy", os.path.join(mouse_dir, "data")
+    mouse_dir: str, trial: int, response_dir: str = None, common_data_dir: str = None, to_tensor: bool = False):
+    if response_dir and common_data_dir:
+        # Synthetic mode: separate paths
+        response_path = os.path.join(response_dir, "data", "responses", f"{trial}.npy")
+        # Other data from common directory
+        data_dir = os.path.join(common_data_dir, "data")
+        
+        def _load_data(item: str):
+            if item == "responses":
+                data = np.load(response_path).astype(np.float32)
+            else:
+                data = np.load(os.path.join(data_dir, item, f"{trial}.npy")).astype(np.float32)
+            return torch.from_numpy(data) if to_tensor else data
+        
+        return {
+            "image": _load_data("images"),
+            "response": _load_data("responses"),
+            "behavior": _load_data("behavior"),
+            "pupil_center": _load_data("pupil_center"),
+        }
+    else:
+        # Original mode
+        """Load data from a single trial in mouse_dir"""
+        filename, data_dir = f"{trial}.npy", os.path.join(mouse_dir, "data")
 
-    def _load_data(item: str):
-        data = np.load(os.path.join(data_dir, item, filename)).astype(np.float32)
-        return torch.from_numpy(data) if to_tensor else data
+        def _load_data(item: str):
+            data = np.load(os.path.join(data_dir, item, filename)).astype(np.float32)
+            return torch.from_numpy(data) if to_tensor else data
 
-    return {
-        "image": _load_data("images"),
-        "response": _load_data("responses"),
-        "behavior": _load_data("behavior"),
-        "pupil_center": _load_data("pupil_center"),
-    }
+        return {
+            "image": _load_data("images"),
+            "response": _load_data("responses"),
+            "behavior": _load_data("behavior"),
+            "pupil_center": _load_data("pupil_center"),
+        }
 
 
 def load_mouse_metadata(
@@ -348,13 +364,13 @@ class MiceDataset(Dataset):
         self.mouse_id = mouse_id
         self.ds_name = args.ds_name
         assert self.ds_name in ("sensorium", "franke2022")
-        mouse2path = get_mouse2path(self.ds_name)
-        mouse_dir = os.path.join(data_dir, mouse2path[mouse_id])
-        metadata = load_mouse_metadata(self.ds_name, mouse_dir=mouse_dir)
+        mouse2path = get_mouse2path(self.ds_name)       
+        self.mouse_dir = os.path.join(data_dir, mouse2path[mouse_id])
+        metadata = load_mouse_metadata(self.ds_name, mouse_dir=self.mouse_dir)
         self.behavior_mode = args.behavior_mode
         if self.behavior_mode and mouse_id == "S0":
             raise ValueError("Mouse S0 does not have behaviour data.")
-        self.mouse_dir = metadata["mouse_dir"]
+        # self.mouse_dir = metadata["mouse_dir"]
         self.neuron_ids = metadata["neuron_ids"]
         self.coordinates = metadata["coordinates"]
         self.stats = metadata["stats"]
@@ -376,8 +392,14 @@ class MiceDataset(Dataset):
 
         # indicate if trial IDs and targets are hashed
         self.hashed = self.ds_name == "sensorium" and mouse_id in ("S0", "S1")
-
-        self.image_shape = get_image_shape(mouse_dir)
+        
+        self.synthetic_data = getattr(args, 'synthetic_data', False)
+        if self.synthetic_data:
+            # For synthetic: responses from data_dir, others from hardcoded path
+            self.common_data_dir = args.image_data
+            self.image_shape = get_image_shape(self.common_data_dir)
+        else:
+            self.image_shape = get_image_shape(self.mouse_dir)
 
         self.gray_scale = False
         if args.gray_scale and self.ds_name == "franke2022":
@@ -505,7 +527,7 @@ class MiceDataset(Dataset):
                 - mouse_id: the mouse ID
         """
         trial = self.indexes[idx]
-        data = load_trial_data(mouse_dir=self.mouse_dir, trial=trial)
+        data = load_trial_data(mouse_dir=self.mouse_dir, response_dir=self.mouse_dir, common_data_dir=self.common_data_dir, trial=trial)
         data["image"] = self.transform_image(data["image"])
         data["response"] = self.transform_response(data["response"])
         data["behavior"] = self.transform_behavior(data["behavior"])

@@ -151,3 +151,7 @@ wandb/
 # runs
 runs_debug/
 /runs_debug
+/runs_debug_
+
+# slurm files
+/slurm_files

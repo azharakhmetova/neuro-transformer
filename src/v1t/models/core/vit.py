@@ -323,13 +323,17 @@ class ViTCore(Core):
         # calculate latent height and width based on num_patches
         if self.readout == "gaussian2d":
             h, w = self.find_shape(num_image_patches)
-            # self.output_shape = (self.transformer.output_shape[-1], h, w)
+            self.output_shape = (args.emb_dim_core, h, w)
             self.rearrange = Rearrange("b (h w) c -> b c h w", h=h, w=w)
         # else:
-        #     if self.subselect_image_tokens:
-        #         self.output_shape = (num_image_patches, self.transformer.output_shape[-1]) # self.transformer.output_shape is (num_neuron_tokens+num_image_tokens, emb_dim)
-        #     else:
-        #         self.output_shape = self.transformer.output_shape # (num_neuron_tokens+num_image_tokens, emb_dim)
+        # if self.subselect_image_tokens:
+        #     self.output_shape = (num_image_patches, args.emb_dim_core) 
+        # else:
+        
+        # it is incorrect, actually it (nu_oatches+num_input_neurons, emb_dim_core) 
+        # but I keep it for now as it is not used in attention readout 
+        # but I need it for gaussian readout
+        self.output_shape = (num_image_patches, args.emb_dim_core)
 
 
 

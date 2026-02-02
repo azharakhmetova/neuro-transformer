@@ -36,7 +36,8 @@ class CrossAttention(nn.Module):
         value_embedding: bool = False,
         subselect_image_tokens: bool = False,
         use_pos_embedding: bool = False,
-        use_flash_attention: bool = False
+        use_flash_attention: bool = False, 
+        **kwargs,
     ):
         super(CrossAttention, self).__init__()
 
@@ -160,9 +161,12 @@ class AttentionReadout(Readout):
         use_pos_embedding: bool = False,
         temperature: tuple = (False, 1.0),
         name: str = "AttentionReadout",
+        **kwargs,
     ):
+        # Extract input_shape from kwargs for parent class
+        input_shape = kwargs.pop('input_shape', None)
         super(AttentionReadout, self).__init__(
-            args, output_shape=output_shape, ds=ds, name=name
+            args, output_shape=output_shape, input_shape=input_shape, ds=ds, name=name
         )
 
         self.use_bias = use_bias

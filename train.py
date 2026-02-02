@@ -288,7 +288,8 @@ def main(args, wandb_sweep: bool = False):
         model = utils.compile(args, model=model)
 
     # utils.plot_samples(args, model=model, ds=train_ds, summary=summary, epoch=epoch)
-    print("number of input neurons:", next(iter(train_ds[args.mouse_ids[0]]))["input_neuron_ids"].shape)
+    if args.frac_input_neurons > 0:
+        print("number of input neurons:", next(iter(train_ds[args.mouse_ids[0]]))["input_neuron_ids"].shape)
     while (epoch := epoch + 1) < args.epochs + 1:
         if args.verbose:
             print(f"\nEpoch {epoch:03d}/{args.epochs:03d}")
@@ -647,6 +648,10 @@ if __name__ == "__main__":
     parser.add_argument("--self_attend_image_tokens", action="store_true", help="use self-attention on image tokens before the core module.")
     
     parser.add_argument("--frac_input_neurons", type=float, default=0.0)
+
+    parser.add_argument('--synthetic_data', action='store_true', help='Use synthetic data mode')
+    parser.add_argument('--image_data', type=str, help='Path to common data (images, behavior, pupil_center)')
+
     temp_args = parser.parse_known_args()[0]
 
     if temp_args.tokenize_neurons:
@@ -728,7 +733,7 @@ if __name__ == "__main__":
             )
             parser.add_argument("--core_reg_scale", type=float, default=0.5379)
             parser.add_argument("--lr", type=float, default=0.001647*0.4)
-            parser.add_argument("--core_lr", type=float, default=None)
+            parser.add_argument("--core_lr", type=float, default=None) 
         case "cct":
             parser.add_argument("--patch_size", type=int, default=8)
             parser.add_argument(
@@ -760,7 +765,7 @@ if __name__ == "__main__":
                 help="stochastic depth dropout rate",
             )
             parser.add_argument("--core_reg_scale", type=float, default=0.5379)
-            parser.add_argument("--lr", type=float, default=0.001647*0.4)
+            parser.add_argument("--lr", type=float, default=0.001647)
             parser.add_argument("--core_lr", type=float, default=None)
         case "stn":
             parser.add_argument("--num_layers", type=int, default=7)

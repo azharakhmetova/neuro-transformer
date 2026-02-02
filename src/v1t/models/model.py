@@ -181,12 +181,24 @@ class Model(nn.Module):
             )
         else:
             self.core_shifter = None
+        # if args.readout == "attention":
+        #     self.add_module(
+        #         name="readouts",
+        #         module=Readouts(
+        #             args,
+        #             model=args.readout,
+        #             # input_shape=self.core.output_shape,
+        #             output_shapes=self.num_output_neurons,
+        #             ds=ds,
+        #         ),
+        #     )
+        # else:
         self.add_module(
             name="readouts",
             module=Readouts(
                 args,
                 model=args.readout,
-                # input_shape=self.core.output_shape,
+                input_shape=self.core.output_shape,
                 output_shapes=self.num_output_neurons,
                 ds=ds,
             ),
@@ -503,7 +515,7 @@ def get_model(args, ds: t.Dict[str, DataLoader], summary: Summary = None) -> Mod
     
     if not args.tokenize_neurons:
         input_data["input_neuron_ids"] = None
-        input_data["query_neuron_ids"] = None
+        input_data["query_neuron_ids"] = None #torch.arange(N, dtype=torch.long, device="cpu")#.view(-1)
     # elif args.tokenize_neurons and args.frac_input_neurons == 0.0:
     #     input_data["input_neuron_ids"] = None#.view(-1)
     #     input_data["query_neuron_ids"] = torch.arange(K, N, dtype=torch.long, device="cpu")#.view(-1)
@@ -539,19 +551,28 @@ def get_model(args, ds: t.Dict[str, DataLoader], summary: Summary = None) -> Mod
         tag="model/trainable_parameters/core",
     )
     # get readout summary
-    num_input_neuron_tokens = model.input_neuron_embedding.output_shapes[mouse_id][0] if args.frac_input_neurons > 0.0 else 0
-    # print("get model num input neuron tokens", num_input_neuron_tokens)
-    get_model_info(
-        model=model.readouts[mouse_id],
-        input_data={
-            "inputs": random_input((batch_size, model.patch_embedding.num_patches + num_input_neuron_tokens, args.emb_dim_core)),
-            "query_neurons": random_input((batch_size, N-K, args.emb_dim_neuron_id)),
-            "query_neuron_ids": input_data["query_neuron_ids"],
-            },
-        filename=os.path.join(args.output_dir, "model_readout.txt"),
-        summary=summary,
-        tag=f"model/trainable_parameters/Mouse{mouse_id}Readout",
-    )
+    if model.readout_type == "attention":
+        num_input_neuron_tokens = model.input_neuron_embedding.output_shapes[mouse_id][0] if args.frac_input_neurons > 0.0 else 0
+        # print("get model num input neuron tokens", num_input_neuron_tokens)
+        get_model_info(
+            model=model.readouts[mouse_id],
+            input_data={
+                "inputs": random_input((batch_size, model.patch_embedding.num_patches + num_input_neuron_tokens, args.emb_dim_core)),
+                "query_neurons": random_input((batch_size, N-K, args.emb_dim_neuron_id)),
+                "query_neuron_ids": input_data["query_neuron_ids"],
+                },
+            filename=os.path.join(args.output_dir, "model_readout.txt"),
+            summary=summary,
+            tag=f"model/trainable_parameters/Mouse{mouse_id}Readout",
+        )
+    else:
+        get_model_info(
+            model=model.readouts[mouse_id],
+            input_data=random_input((batch_size, *model.core.output_shape)),
+            filename=os.path.join(args.output_dir, "model_readout.txt"),
+            summary=summary,
+            tag=f"model/trainable_parameters/Mouse{mouse_id}Readout",
+        ) 
     print("exit get_model")
     model.to(args.device)
     return model
