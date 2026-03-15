@@ -73,6 +73,9 @@ def train_step(
                 behaviors=micro_batch["behavior"].to(device),
                 pupil_centers=micro_batch["pupil_center"].to(device),
             )
+            if model.readout_type == "gaussian2d":
+                # y_pred: (batch_size, num_neurons)
+                y_pred = y_pred[:, query_neuron_ids]
             loss = criterion(
                 y_true=y_true,
                 y_pred=y_pred,
@@ -181,6 +184,9 @@ def validation_step(
                 behaviors=micro_batch["behavior"].to(device),
                 pupil_centers=micro_batch["pupil_center"].to(device),
             )
+            if model.readout_type == "gaussian2d":
+                # y_pred: (batch_size, num_neurons)
+                y_pred = y_pred[:, query_neuron_ids]
             loss = criterion(
                 y_true=y_true,
                 y_pred=y_pred,

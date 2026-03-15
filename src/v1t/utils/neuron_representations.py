@@ -114,7 +114,7 @@ def sample_neuron_tokens(
             # print("input n tokens before SA:", input_neuron_tokens.shape)
             if repr_type == "initial":
                 # print("saving initial input neuron tokens")
-                np.save(os.path.join(out_dir, f"{batch_idx}.npy"), input_neuron_tokens_initial.detach().cpu().numpy().astype(np.float32))
+                np.save(os.path.join(out_dir, f"{batch_idx}.npy"), input_neuron_tokens_initial.detach().cpu().numpy().astype(np.float16))
                 batch_idx += 1
                 continue
             # print("input n tokens initial:", input_neuron_tokens_initial.shape)
@@ -139,7 +139,7 @@ def sample_neuron_tokens(
                 )  # [B, Layers, Heads, K, K]
             if repr_type == "after_sa":
                 # print("saving initial input neuron tokens")
-                np.save(os.path.join(out_dir, f"{batch_idx}.npy"), input_neuron_tokens.detach().cpu().numpy().astype(np.float32))
+                np.save(os.path.join(out_dir, f"{batch_idx}.npy"), input_neuron_tokens.detach().cpu().numpy().astype(np.float16))
                 batch_idx += 1
                 # print("input neuron tokens after SA:", input_neuron_tokens.shape)
                 continue
@@ -170,7 +170,7 @@ def sample_neuron_tokens(
         )  # outputs: [B, S, C]; core_attn: [B, Layers, Heads, S, S] (S = P (+K))
         if repr_type == "after_core":
             # print("core output tokens:", outputs[:, P:].shape)
-            np.save(os.path.join(out_dir, f"{batch_idx}.npy"), outputs[:, P:].detach().cpu().numpy().astype(np.float32))
+            np.save(os.path.join(out_dir, f"{batch_idx}.npy"), outputs[:, P:].detach().cpu().numpy().astype(np.float16))
             batch_idx += 1
             continue
 
@@ -212,7 +212,7 @@ def sample_neuron_tokens(
                 query_neurons = readout.id_query_projection(query_neurons)
             outputs = readout.cross_attention(q=query_neurons, inputs=outputs)
             # print("query neuron tokens:", outputs.shape)
-            np.save(os.path.join(out_dir, f"{batch_idx}.npy"), outputs.detach().cpu().numpy().astype(np.float32))
+            np.save(os.path.join(out_dir, f"{batch_idx}.npy"), outputs.detach().cpu().numpy().astype(np.float16))
             batch_idx += 1
             
         # out["images"].append(i_T_img(images.cpu()))

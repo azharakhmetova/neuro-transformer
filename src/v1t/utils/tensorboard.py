@@ -9,6 +9,7 @@ import pandas as pd
 from PIL import Image
 import seaborn as sns
 import matplotlib.cm as cm
+from matplotlib import font_manager
 import matplotlib.pyplot as plt
 from torchvision import transforms
 import matplotlib.font_manager as font_manager
@@ -41,15 +42,48 @@ COLORMAP = TURBO
 GRAY2RGB = COLORMAP(np.arange(256))[:, :3]
 
 
+# def set_font():
+#     font_path = os.getenv("MATPLOTLIB_FONT")
+#     if font_path is not None and os.path.exists(font_path):
+#         font_manager.fontManager.addfont(path=font_path)
+#         prop = font_manager.FontProperties(fname=font_path)
+#         plt.rcParams.update(
+#             {"font.family": "sans-serif", "font.sans-serif": prop.get_name()}
+#         )
 def set_font():
+    import os
+    import matplotlib.pyplot as plt
+    from matplotlib import font_manager
+
     font_path = os.getenv("MATPLOTLIB_FONT")
     if font_path is not None and os.path.exists(font_path):
         font_manager.fontManager.addfont(path=font_path)
         prop = font_manager.FontProperties(fname=font_path)
-        plt.rcParams.update(
-            {"font.family": "sans-serif", "font.sans-serif": prop.get_name()}
-        )
+        plt.rcParams.update({"font.family": "sans-serif",
+                             "font.sans-serif": prop.get_name()})
 
+    plt.rcParams.update({
+        # backgrounds
+        "figure.facecolor": "white",
+        "savefig.facecolor": "white",
+        "axes.facecolor": "white",
+
+        # text/ticks in black
+        "text.color": "black",
+        "axes.labelcolor": "black",
+        "xtick.color": "black",
+        "ytick.color": "black",
+
+        # grid (subtle)
+        "axes.grid": True,
+        "grid.alpha": 0.25,
+        "grid.linewidth": 0.8,
+        "grid.color": "0.85",
+
+        # frame/spines
+        "axes.edgecolor": "black",
+        "axes.linewidth": 0.8,
+    })
 
 def remove_spines(axis: matplotlib.axes.Axes):
     """remove all spines"""

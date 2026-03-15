@@ -1,4 +1,4 @@
-program: decoding_latents_pytorch.py
+program: linear_probe_responses.py
 method: bayes
 run_cap: 5
 metric:
@@ -8,7 +8,7 @@ parameters:
   lr:
     distribution: log_uniform_values
     min: 7e-4
-    max: 4e-3
+    max: 1e-2
   # weight_decay:
   #   distribution: log_uniform_values
   #   min: 1e-5
@@ -17,38 +17,24 @@ parameters:
     distribution: log_uniform_values
     min: 5e-6
     max: 1e-3
-  # ds_pooling:
-  #   values: ["max"]   # or ["none","mean","max","min"]
 
 command:
   - ${env}
   - python
   - ${program}
   - --K
-  - 4
+  - 24
   - --ALPHA
-  - "06"
-  - --FRAC_INPUT
-  - "00"
-  - --SEED
-  - 1
-  - --LR
-  - "04"
+  - "1_5"
   - --select_frac_neurons
-  - 0.1
+  - 0.5
+  - --predict
+  - latents
   - --batch_size
   - 256
-  - --ds_pooling
-  - none
-  - --learned_pooling
-  - attention
   - --reg_type
   - lasso
-  - --dataset
-  - /user/azhar.akhmetova/u12008/neuro-transformer/data/sensorium
   - --device
   - cpu 
-  - --representation_type
-  - queries
   - ${args}   # 👈 THIS injects: --lr <...> --weight_decay <...> --l1_reg <...> --ds_pooling <...> --batch_size <...>
 

@@ -52,7 +52,7 @@ def get_neuron_indices(rep_dir, neuron_fraction=1.0, neuron_seed=42, idx_folder=
     """Get neuron indices for nested subsampling"""
     # Try to load existing indices
     if idx_folder is not None:
-        file_path = os.path.join(idx_folder, f"input_frac_{neuron_fraction:.2f}_seed_{neuron_seed}.pkl")
+        file_path = os.path.join(save_folder, f"input_frac_{neuron_fraction:.3f}_seed_{neuron_seed}.pkl")
         try:
             with open(file_path, 'rb') as f:
                 neuron_data = pickle.load(f)
@@ -67,13 +67,12 @@ def get_neuron_indices(rep_dir, neuron_fraction=1.0, neuron_seed=42, idx_folder=
             first_file = fnames[0]
             first_arr = np.load(os.path.join(train_dir, first_file), mmap_mode='r')
             N = first_arr.shape[1]  # number of neurons
-            print(f"Loaded N={N} from file {first_file}")
             
             # Verify loaded data is consistent
             if neuron_data['total_neurons'] != N:
                 print(f"Warning: Loaded N={neuron_data['total_neurons']} but current data has N={N}")
             
-            return input_indices, query_indices
+            return input_indices, query_indices, N
             
         except (FileNotFoundError, KeyError, pickle.UnpicklingError) as e:
             print(f"Could not load existing indices ({e}), generating new ones...")
@@ -111,13 +110,13 @@ def get_neuron_indices(rep_dir, neuron_fraction=1.0, neuron_seed=42, idx_folder=
             }
             
             # Create filename
-            filename = f"input_frac_{neuron_fraction:.2f}_seed_{neuron_seed}.pkl"
+            filename = f"input_frac_{neuron_fraction:.3f}_seed_{neuron_seed}.pkl"
             filepath = os.path.join(save_folder, filename)
             os.makedirs(save_folder, exist_ok=True)
             
             with open(filepath, 'wb') as f:
                 pickle.dump(neuron_data, f)
-    return input_indices, query_indices
+    return input_indices, query_indices, N
 
 
 def _nat_sorted_npy(dirpath):
@@ -599,10 +598,10 @@ def run_training_with_early_stopper(args, model, optimizer, scheduler, loss_func
 def main(args):
     # if not os.path.isdir(args.output_dir):
     #     raise FileNotFoundError(f"Cannot find {args.output_dir}.")
-    output_dir = f"/mnt/lustre-grete/usr/u12008/neuron_representations/k_{args.K}_a_{args.ALPHA}_b1e7_poisson/k_{args.K}_a_{args.ALPHA}_xyz_nosubsel_1dLL_lrx{args.LR}_meanbias_2dpe_bef_core_bs_16_frac0_{args.FRAC_INPUT}_s_{args.SEED}"
+    output_dir = f"/mnt/lustre-grete/usr/u12008/neuron_representations/k_{args.K}_a_{args.ALPHA}_b1e7_poisson/k_{args.K}_a_{args.ALPHA}_xyz_nosubsel_1dLL_lrx04_meanbias_2dpe_bef_core_bs_16_frac0_{args.FRAC_INPUT}_s_{args.SEED}"
     latents_path = f"/user/azhar.akhmetova/u12008/neuro-transformer/misc/analysis/latents/k_{args.K}/z_k_{args.K}_no_train_dupl.npy"
 
-    args.output_dir = f"/user/azhar.akhmetova/u12008/neuro-transformer/runs_debug/analysis_bs16/k_{args.K}/a_{args.ALPHA}/seed_{args.SEED}/k_{args.K}_a_{args.ALPHA}_xyz_nosubsel_1dLL_lrx{args.LR}_meanbias_2dpe_bef_core_bs_16_frac0_{args.FRAC_INPUT}_s_{args.SEED}"
+    args.output_dir = f"/user/azhar.akhmetova/u12008/neuro-transformer/runs_debug/analysis_bs16/k_{args.K}/a_{args.ALPHA}/seed_{args.SEED}/k_{args.K}_a_{args.ALPHA}_xyz_nosubsel_1dLL_lrx04_meanbias_2dpe_bef_core_bs_16_frac0_{args.FRAC_INPUT}_s_{args.SEED}"
     utils.get_device(args)
     utils.set_random_seed(1234)
 
@@ -632,10 +631,7 @@ def main(args):
         rep_dir = os.path.join(output_dir, args.representation_type, f"sel_frac_{args.select_frac_neurons}")
 
     if args.representation_type == "initial":
-        if args.select_frac_neurons != 0.:
-            neuron_indices, query_indices = get_neuron_indices(rep_dir, neuron_fraction=args.select_frac_neurons, neuron_seed=42, idx_folder=args.idx_folder)
-        else:
-            neuron_indices = None
+        neuron_indices, query_indices, N = get_neuron_indices(rep_dir, neuron_fraction=args.select_frac_neurons, neuron_seed=42, idx_folder=args.idx_folder)
     else:
         neuron_indices = None
 
@@ -746,7 +742,7 @@ def main(args):
         ),
     )
     # --- Per-sweep/run directories ---
-    sweep_dir = f"/mnt/lustre-grete/usr/u12008/decoding/k_{args.K}_a_{args.ALPHA}_b1e7_poisson/k_{args.K}_a_{args.ALPHA}_xyz_nosubsel_1dLL_lrx{args.LR}_meanbias_2dpe_bef_core_bs_16_frac0_{args.FRAC_INPUT}_s_{args.SEED}"
+    sweep_dir = f"/mnt/lustre-grete/usr/u12008/decoding/k_{args.K}_a_{args.ALPHA}_b1e7_poisson/k_{args.K}_a_{args.ALPHA}_xyz_nosubsel_1dLL_lrx04_meanbias_2dpe_bef_core_bs_16_frac0_{args.FRAC_INPUT}_s_{args.SEED}"
     sweep_id = os.environ.get("WANDB_SWEEP_ID")  # set by wandb agent
     if ds_pooling != "none":
         base_dir  = os.path.join(sweep_dir, args.representation_type, f"sel_frac_{args.select_frac_neurons}", f"{args.ds_pooling}_p", f"sweep-{sweep_id or 'nosweep'}")
@@ -877,7 +873,6 @@ if __name__ == "__main__":
     # parser.add_argument("--latents_path", type=str, required=True, help="Path to latents .npy file")
     parser.add_argument("--reg_type", type=str, default="ridge", choices=["ridge", "lasso", "elasticnet"], help="Type of regularization for linear model")
     parser.add_argument("--lr", type=float, default=1e-3)
-    parser.add_argument("--LR", type=str, default="04")
     parser.add_argument("--weight_decay", type=float, default=0.01, help="L2 via AdamW")
     parser.add_argument("--l1_reg", type=float, default=0.0, help="L1 regularization strength")
     parser.add_argument("--learned_pooling", type=str, default="none", choices=["linear", "attention", "none"], help="Pooling mode: linear/attention")

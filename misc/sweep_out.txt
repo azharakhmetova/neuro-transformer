@@ -1,0 +1,4 @@
+wandb: Creating sweep from: sweep_latents.yaml
+wandb: Creating sweep with ID: 9ydhq7dj
+wandb: View sweep at: https://wandb.ai/azharakhmetova-master-thesis/whitened-latents-queries/sweeps/9ydhq7dj
+wandb: Run sweep agent with: wandb agent azharakhmetova-master-thesis/whitened-latents-queries/9ydhq7dj

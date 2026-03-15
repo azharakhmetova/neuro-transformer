@@ -320,12 +320,6 @@ class ViTCore(Core):
                 self.neuron_projection = nn.Linear(args.emb_dim_input_neurons, args.emb_dim_core)
             
         self.subselect_image_tokens = args.subselect_image_tokens
-        # calculate latent height and width based on num_patches
-        if self.readout == "gaussian2d":
-            h, w = self.find_shape(num_image_patches)
-            self.output_shape = (args.emb_dim_core, h, w)
-            self.rearrange = Rearrange("b (h w) c -> b c h w", h=h, w=w)
-        # else:
         # if self.subselect_image_tokens:
         #     self.output_shape = (num_image_patches, args.emb_dim_core) 
         # else:
@@ -335,7 +329,11 @@ class ViTCore(Core):
         # but I need it for gaussian readout
         self.output_shape = (num_image_patches, args.emb_dim_core)
 
-
+        # calculate latent height and width based on num_patches
+        if self.readout == "gaussian2d":
+            h, w = self.find_shape(num_image_patches)
+            self.output_shape = (args.emb_dim_core, h, w)
+            self.rearrange = Rearrange("b (h w) c -> b c h w", h=h, w=w)
 
     @staticmethod
     def find_shape(num_patches: int):

@@ -155,3 +155,24 @@ runs_debug/
 
 # slurm files
 /slurm_files
+/misc/slurm_files
+/misc/slurm_probes 
+/misc/slurm_responses
+/misc/slurm_resp_latents
+
+/misc/slurm_probe_k4_06
+/misc/slurm_probe_k8_09
+/misc/slurm_probe_k12_1_1
+/misc/slurm_probe_k16_1_2
+/misc/slurm_probe_k20_1_3
+/misc/slurm_probe_k24_1_5
+
+/misc/slurm_probe_k24_1_5_0_00
+/misc/slurm_probe_k24_1_5_0_05
+/misc/slurm_probe_k24_1_5_0_20
+/misc/slurm_probe_k24_1_5_0_50
+
+/misc/slurm_probe_k12_1_3_0_00
+/misc/slurm_probe_k12_1_3_0_05
+/misc/slurm_probe_k12_1_3_0_20
+/misc/slurm_probe_k12_1_3_0_50

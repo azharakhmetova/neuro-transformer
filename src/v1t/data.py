@@ -36,18 +36,23 @@ SENSORIUM = {
     "k_16_a_0_b1e7_poisson_strat":             "k_16_a_0_beta1e7_poisson_stratified",
     "k_24_a_0_b1e7_poisson":                   "k_24_a_0_beta1e7_poisson",
     "k_24_a_0_b1e7_poisson_strat":             "k_24_a_0_beta1e7_poisson_stratified",
-    # mid regime: matching stimuli and latent variances
-    "k_4_a_056_b1e7_poisson":                    "k_4_a_056_beta1e7_poisson",
-    "k_4_a_056_b1e7_poisson_strat":              "k_4_a_056_beta1e7_poisson_stratified",
-    "k_8_a_056_b1e7_poisson":                    "k_8_a_056_beta1e7_poisson",
-    "k_8_a_056_b1e7_poisson_strat":              "k_8_a_056_beta1e7_poisson_stratified",
-    "k_16_a_056_b1e7_poisson":                   "k_16_a_056_beta1e7_poisson",
-    "k_16_a_056_b1e7_poisson_strat":             "k_16_a_056_beta1e7_poisson_stratified",
-    "k_24_a_056_b1e7_poisson":                   "k_24_a_056_beta1e7_poisson",
-    "k_24_a_056_b1e7_poisson_strat":             "k_24_a_056_beta1e7_poisson_stratified",
-    # mid regime: mean matching
+    # mid regime: cohen d and p95
+    "k_4_a_06_b1e7_poisson":                    "k_4_a_06_beta1e7_poisson",
+    "k_4_a_06_b1e7_poisson_strat":              "k_4_a_06_beta1e7_poisson_stratified",
     "k_8_a_09_b1e7_poisson":                    "k_8_a_09_beta1e7_poisson",
     "k_8_a_09_b1e7_poisson_strat":              "k_8_a_09_beta1e7_poisson_stratified",
+    "k_12_a_1_1_b1e7_poisson":                   "k_12_a_1_1_beta1e7_poisson",
+    "k_12_a_1_1_b1e7_poisson_strat":             "k_12_a_1_1_beta1e7_poisson_stratified",
+    "k_16_a_1_2_b1e7_poisson":                   "k_16_a_1_2_beta1e7_poisson",
+    "k_16_a_1_2_b1e7_poisson_strat":             "k_16_a_1_2_beta1e7_poisson_stratified",
+    "k_20_a_1_3_b1e7_poisson":                   "k_20_a_1_3_beta1e7_poisson",
+    "k_20_a_1_3_b1e7_poisson_strat":             "k_20_a_1_3_beta1e7_poisson_stratified",
+    "k_24_a_1_5_b1e7_poisson":                   "k_24_a_1_5_beta1e7_poisson",
+    "k_24_a_1_5_b1e7_poisson_strat":             "k_24_a_1_5_beta1e7_poisson_stratified",
+    
+    # mid regime: mean matching
+    "k_4_a_056_b1e7_poisson":                    "k_4_a_056_beta1e7_poisson",
+    "k_4_a_056_b1e7_poisson_strat":              "k_4_a_056_beta1e7_poisson_stratified",
     "k_16_a_1_6_b1e7_poisson":                   "k_16_a_1_6_beta1e7_poisson",
     "k_16_a_1_6_b1e7_poisson_strat":             "k_16_a_1_6_beta1e7_poisson_stratified",
     "k_24_a_2_6_b1e7_poisson":                   "k_24_a_2_6_beta1e7_poisson",
@@ -59,13 +64,23 @@ SENSORIUM = {
     "k_16_a_1_2_b1e7_poisson_strat":             "k_16_a_1_2_beta1e7_poisson_stratified",
     "k_24_a_1_6_b1e7_poisson":                   "k_24_a_1_6_beta1e7_poisson",
     "k_24_a_1_6_b1e7_poisson_strat":             "k_24_a_1_6_beta1e7_poisson_stratified",
+    #same alpha
+    "k_4_a_09_b1e7_poisson":                     "k_4_a_09_beta1e7_poisson",
+    "k_12_a_09_b1e7_poisson":                    "k_12_a_09_beta1e7_poisson",
+    "k_16_a_09_b1e7_poisson":                    "k_16_a_09_beta1e7_poisson",
+    "k_20_a_09_b1e7_poisson":                    "k_20_a_09_beta1e7_poisson",
+    "k_24_a_09_b1e7_poisson":                    "k_24_a_09_beta1e7_poisson",
     # latent dominating regime
     "k_4_a_max_b1e7_poisson":                    "k_4_a_max_beta1e7_poisson",
     "k_4_a_max_b1e7_poisson_strat":              "k_4_a_max_beta1e7_poisson_stratified",
     "k_8_a_max_b1e7_poisson":                    "k_8_a_max_beta1e7_poisson",
     "k_8_a_max_b1e7_poisson_strat":              "k_8_a_max_beta1e7_poisson_stratified",
+    "k_12_a_max_b1e7_poisson":                   "k_12_a_max_beta1e7_poisson",
+    "k_12_a_max_b1e7_poisson_strat":             "k_12_a_max_beta1e7_poisson_stratified",
     "k_16_a_max_b1e7_poisson":                   "k_16_a_max_beta1e7_poisson",
     "k_16_a_max_b1e7_poisson_strat":             "k_16_a_max_beta1e7_poisson_stratified",
+    "k_20_a_max_b1e7_poisson":                   "k_20_a_max_beta1e7_poisson",
+    "k_20_a_max_b1e7_poisson_strat":             "k_20_a_max_beta1e7_poisson_stratified",
     "k_24_a_max_b1e7_poisson":                   "k_24_a_max_beta1e7_poisson",
     "k_24_a_max_b1e7_poisson_strat":             "k_24_a_max_beta1e7_poisson_stratified",
 }
@@ -397,8 +412,11 @@ class MiceDataset(Dataset):
         if self.synthetic_data:
             # For synthetic: responses from data_dir, others from hardcoded path
             self.common_data_dir = args.image_data
+            self.response_dir = self.mouse_dir
             self.image_shape = get_image_shape(self.common_data_dir)
         else:
+            self.common_data_dir = None
+            self.response_dir = None
             self.image_shape = get_image_shape(self.mouse_dir)
 
         self.gray_scale = False
@@ -527,7 +545,7 @@ class MiceDataset(Dataset):
                 - mouse_id: the mouse ID
         """
         trial = self.indexes[idx]
-        data = load_trial_data(mouse_dir=self.mouse_dir, response_dir=self.mouse_dir, common_data_dir=self.common_data_dir, trial=trial)
+        data = load_trial_data(mouse_dir=self.mouse_dir, response_dir=self.response_dir, common_data_dir=self.common_data_dir, trial=trial)
         data["image"] = self.transform_image(data["image"])
         data["response"] = self.transform_response(data["response"])
         data["behavior"] = self.transform_behavior(data["behavior"])
